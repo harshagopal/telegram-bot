@@ -1,7 +1,7 @@
 import requests
 
 BOT_TOKEN = "7903820907:AAHEwfUQEZMrwkG-bU8kCFZ0fJOAUTDGUuA"
-CHAT_ID = "@aiappsselfcreation"
+CHAT_ID = "aiappsselfcreation"
 MESSAGE = "Hello, this is an automated message from my Telegram bot!"
 
 def send_message():
