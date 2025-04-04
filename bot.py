@@ -1,36 +1,35 @@
 import requests
 import os
 import time
+import logging
 from flask import Flask
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 app = Flask(__name__)
 
+# Load environment variables
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
 GUMROAD_ACCESS_TOKEN = os.getenv("GUMROAD_ACCESS_TOKEN")
 CONVERTKIT_API_KEY = os.getenv("CONVERTKIT_API_KEY")
+PINTEREST_API_KEY = os.getenv("PINTEREST_API_KEY")
 
-def fetch_api_data(url, headers=None, retries=2, delay=2):
-    """Fetch data from API with retries and debug logs."""
+def fetch_api_data(url, headers=None, retries=3, delay=5):
+    """Fetch data from API with retries."""
     for attempt in range(retries):
         try:
-            print(f"🛠️ Attempt {attempt+1}: Fetching {url}")
-            response = requests.get(url, headers=headers, timeout=5)
-            
-            print(f"🔍 Response Status: {response.status_code}")
-            if response.status_code == 200:
-                print(f"✅ API Response: {response.text[:200]}")  # Print first 200 chars
-                return response.json()
-            else:
-                print(f"⚠️ API Error {response.status_code}: {response.text[:200]}")
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()  # Raise error for 4xx/5xx responses
+            return response.json()
         except requests.exceptions.RequestException as e:
-            print(f"❌ Network Error: {e}")
+            logging.warning(f"Attempt {attempt+1}: API error - {e}")
         time.sleep(delay)
-    
-    print("❌ All attempts failed!")
-    return None
+    return None  # Return None if all attempts fail
 
 def get_gumroad_earnings():
+    """Fetch earnings from Gumroad API."""
     url = "https://api.gumroad.com/v2/sales"
     headers = {"Authorization": f"Bearer {GUMROAD_ACCESS_TOKEN}"}
     
@@ -38,38 +37,39 @@ def get_gumroad_earnings():
     if data and "sales" in data:
         total_earnings = sum(float(sale['price']) / 100 for sale in data['sales'])
         return f"💰 **Gumroad Earnings**: ₹{total_earnings:,.2f}"
-    return "⚠️ Failed to fetch Gumroad earnings."
+    return "❌ Failed to fetch Gumroad earnings."
 
-def get_convertkit_earnings():
+def get_convertkit_subscribers():
+    """Fetch subscriber count from ConvertKit API."""
     url = f"https://api.convertkit.com/v3/subscribers?api_key={CONVERTKIT_API_KEY}"
     
     data = fetch_api_data(url)
     if data and "subscribers" in data:
-        total_subscribers = len(data['subscribers'])
-        return f"📧 **ConvertKit Subscribers**: {total_subscribers} active."
-    
-    return "⚠️ ConvertKit API Failed (Check Logs)"
+        return f"📧 **ConvertKit Subscribers**: {len(data['subscribers'])} active."
+    return "❌ Failed to fetch ConvertKit data."
 
-def test_dummy_api():
-    """Test if Railway is blocking external requests."""
-    print("🔄 Testing dummy API (jsonplaceholder)...")
-    response = fetch_api_data("https://jsonplaceholder.typicode.com/posts/1")
+def get_pinterest_analytics():
+    """Fetch analytics from Pinterest API."""
+    url = f"https://api.pinterest.com/v5/user_account?access_token={PINTEREST_API_KEY}"
     
-    if response:
-        print("✅ Dummy API Request Successful!")
-    else:
-        print("❌ Dummy API Request Failed! Railway may be blocking requests.")
+    data = fetch_api_data(url)
+    if data and "monthly_views" in data:
+        return f"📌 **Pinterest Views**: {data['monthly_views']:,} this month."
+    return "❌ Failed to fetch Pinterest analytics."
 
 def send_telegram_message():
-    print("🚀 Fetching earnings data...")
-    
+    """Send daily earnings report to Telegram."""
+    logging.info("🚀 Fetching earnings data...")
+
     gumroad_message = get_gumroad_earnings()
-    convertkit_message = get_convertkit_earnings()
+    convertkit_message = get_convertkit_subscribers()
+    pinterest_message = get_pinterest_analytics()
 
     message = (
         "🚀 **Daily Earnings Report**\n\n"
         f"{gumroad_message}\n"
-        f"{convertkit_message}\n\n"
+        f"{convertkit_message}\n"
+        f"{pinterest_message}\n\n"
         "✅ Automated updates sent every day at 7:30 AM IST!"
     )
 
@@ -79,16 +79,16 @@ def send_telegram_message():
     response = requests.post(url, json=payload)
 
     if response.status_code == 200:
-        print("✅ Telegram message sent successfully!")
+        logging.info("✅ Telegram message sent successfully!")
     else:
-        print(f"❌ Failed to send Telegram message. Response: {response.text}")
+        logging.error(f"❌ Failed to send Telegram message. Response: {response.text}")
 
 @app.route("/")
 def trigger():
-    test_dummy_api()  # Run connectivity test
+    """Trigger the report manually."""
     send_telegram_message()
     return "✅ Message Sent", 200
 
 if __name__ == "__main__":
-    print("🚀 Bot started...")
+    logging.info("🚀 Bot started...")
     app.run(host="0.0.0.0", port=5000)
