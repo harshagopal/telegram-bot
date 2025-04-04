@@ -1,7 +1,7 @@
-import requests
+import logging
 import os
 import time
-import logging
+import requests
 from flask import Flask
 
 # Configure logging
@@ -14,7 +14,6 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
 GUMROAD_ACCESS_TOKEN = os.getenv("GUMROAD_ACCESS_TOKEN")
 CONVERTKIT_API_KEY = os.getenv("CONVERTKIT_API_KEY")
-PINTEREST_API_KEY = os.getenv("PINTEREST_API_KEY")
 
 def fetch_api_data(url, headers=None, retries=3, delay=5):
     """Fetch data from API with retries and error handling."""
@@ -88,12 +87,12 @@ def send_telegram_message():
     else:
         logging.error(f"❌ Failed to send Telegram message. Response: {response.text}")
 
-@app.route("/")
-def trigger():
-    """Trigger the report manually."""
+# Trigger function for the scheduler
+def trigger_scheduled_job():
+    """Triggered by the scheduler to send the message."""
     send_telegram_message()
-    return "✅ Message Sent", 200
 
 if __name__ == "__main__":
     logging.info("🚀 Bot started...")
+    # This is useful for local testing, but your scheduler will handle the actual triggering
     app.run(host="0.0.0.0", port=5000)
