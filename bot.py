@@ -1,9 +1,8 @@
 import requests
-import os
 
-# Replace with your bot's token and your channel's ID
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # or hard-code the token here
-TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")  # or hard-code the channel ID here
+# Replace with your bot's token and your channel's ID directly in the script
+TELEGRAM_BOT_TOKEN = "7903820907:AAHEwfUQEZMrwkG-bU8kCFZ0fJOAUTDGUuA"  # Hardcoded token
+TELEGRAM_CHANNEL_ID = "@aiappsselfcreation"  # Hardcoded channel ID
 
 # Send a message to the Telegram channel
 def send_telegram_message():
@@ -12,7 +11,7 @@ def send_telegram_message():
         "chat_id": TELEGRAM_CHANNEL_ID,
         "text": "Hi",  # Message you want to send
     }
-    
+
     response = requests.post(url, data=payload)
 
     if response.status_code == 200:
