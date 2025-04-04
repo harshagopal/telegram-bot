@@ -1,14 +1,23 @@
+import os
 import requests
 
-BOT_TOKEN = "7903820907:AAHEwfUQEZMrwkG-bU8kCFZ0fJOAUTDGUuA"
-CHAT_ID = "668831071"
-MESSAGE = "Hello, this is an automated message from my Telegram bot!"
+# Load environment variables
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+GUMROAD_ACCESS_TOKEN = os.environ.get("GUMROAD_ACCESS_TOKEN")
+CONVERTKIT_API_SECRET = os.environ.get("CONVERTKIT_API_SECRET")
 
-def send_message():
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": MESSAGE}
-    response = requests.post(url, data=data)
+# Function to send a Telegram message
+def send_telegram_message(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    response = requests.post(url, json=payload)
     return response.json()
 
+# Example: Send a test message
 if __name__ == "__main__":
-    send_message()
+    send_telegram_message("Bot is now running on Railway! 🚀")
