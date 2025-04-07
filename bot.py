@@ -1,99 +1,116 @@
 import requests
-import pytz
-from datetime import datetime
 import logging
+from datetime import datetime, timedelta
+import pytz
 
-# Constants
+# Logging setup
+logging.basicConfig(level=logging.INFO)
+
+# Constants (hardcoded)
 TELEGRAM_BOT_TOKEN = "7903820907:AAHEwfUQEZMrwkG-bU8kCFZ0fJOAUTDGUuA"
 TELEGRAM_CHAT_ID = "@aiappsselfcreation"
 CONVERTKIT_API_SECRET = "0C9EKl_OG2Q_xC788hz1lEt2p3algRB2q2OvOcrgpHo"
 GUMROAD_ACCESS_TOKEN = "2Ot9MDcaOCiQkPZF0vfjGaqIkQEl9NsKmm8Ouzgq29A"
 
-# Logging
-logging.basicConfig(level=logging.INFO)
-
-def fetch_convertkit_subscribers(since_date):
-    url = f"https://api.convertkit.com/v3/subscribers?api_secret={CONVERTKIT_API_SECRET}&from_date={since_date}"
-    try:
-        response = requests.get(url)
-        data = response.json()
-        return len(data.get("subscribers", []))
-    except Exception as e:
-        logging.error(f"Error fetching ConvertKit data: {e}")
-        return "Error"
-
-def fetch_gumroad_earnings(since_date):
-    url = f"https://api.gumroad.com/v2/sales?access_token={GUMROAD_ACCESS_TOKEN}&since={since_date}"
-    try:
-        response = requests.get(url)
-        data = response.json()
-        total = sum(float(sale["price"]) / 100 for sale in data.get("sales", []))
-        return f"${total:.2f}"
-    except Exception as e:
-        logging.error(f"Error fetching Gumroad data: {e}")
-        return "Error"
-
+# Function to detect which summaries to send
 def get_summary_types():
     now = datetime.now(pytz.timezone("Asia/Kolkata"))
-    minute = now.minute
     summary_types = []
 
-    if 0 <= minute < 5:
+    if now.hour == 2:
         summary_types.append("daily")
-    elif 5 <= minute < 10:
-        summary_types.append("weekly")
-    elif 10 <= minute < 15:
-        summary_types.append("monthly")
-    elif 15 <= minute < 20:
-        summary_types.append("quarterly")
-    elif 20 <= minute < 25:
-        summary_types.append("yearly")
 
+        if now.weekday() == 0:  # Monday
+            summary_types.append("weekly")
+        
+        if now.day == 1:
+            summary_types.append("monthly")
+
+            if now.month in [1, 4, 7, 10]:  # Quarterly start
+                summary_types.append("quarterly")
+            
+            if now.month == 1:
+                summary_types.append("yearly")
+    
     return summary_types, now
 
-def get_start_date(summary_type, now):
-    if summary_type == "daily":
-        return (now.replace(hour=0, minute=0, second=0)).strftime("%Y-%m-%d")
-    elif summary_type == "weekly":
-        start = now - timedelta(days=now.weekday())
-        return start.strftime("%Y-%m-%d")
-    elif summary_type == "monthly":
-        return now.replace(day=1).strftime("%Y-%m-%d")
-    elif summary_type == "quarterly":
-        quarter_start_month = ((now.month - 1) // 3) * 3 + 1
-        return now.replace(month=quarter_start_month, day=1).strftime("%Y-%m-%d")
-    elif summary_type == "yearly":
-        return now.replace(month=1, day=1).strftime("%Y-%m-%d")
+def fetch_convertkit_subscribers(since_date):
+    url = f"https://api.convertkit.com/v3/subscribers"
+    params = {
+        "api_secret": CONVERTKIT_API_SECRET,
+        "from_date": since_date.isoformat()
+    }
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            return len(response.json().get("subscribers", []))
+        else:
+            logging.error(f"ConvertKit Error: {response.text}")
+            return 0
+    except Exception as e:
+        logging.error(f"ConvertKit Exception: {e}")
+        return 0
+
+def fetch_gumroad_earnings(since_date):
+    url = "https://api.gumroad.com/v2/sales"
+    params = {
+        "access_token": GUMROAD_ACCESS_TOKEN,
+        "since": since_date.strftime('%Y-%m-%d')
+    }
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            sales = response.json().get("sales", [])
+            return sum(float(sale.get("price", 0)) / 100 for sale in sales)
+        else:
+            logging.error(f"Gumroad Error: {response.text}")
+            return 0.0
+    except Exception as e:
+        logging.error(f"Gumroad Exception: {e}")
+        return 0.0
 
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message
+    }
     try:
         response = requests.post(url, data=payload)
         if response.status_code == 200:
             logging.info("Message sent successfully.")
         else:
-            logging.error(f"Failed to send message: {response.text}")
+            logging.error(f"Telegram Error: {response.text}")
     except Exception as e:
-        logging.error(f"Telegram send error: {e}")
+        logging.error(f"Telegram Exception: {e}")
+
+def get_since_date(now, summary_type):
+    if summary_type == "daily":
+        return now - timedelta(days=1)
+    elif summary_type == "weekly":
+        return now - timedelta(weeks=1)
+    elif summary_type == "monthly":
+        return now.replace(day=1) - timedelta(days=1)
+    elif summary_type == "quarterly":
+        quarter_start_month = (now.month - 1) // 3 * 3 + 1
+        start = datetime(now.year, quarter_start_month, 1, tzinfo=now.tzinfo)
+        return start - timedelta(days=1)
+    elif summary_type == "yearly":
+        return datetime(now.year, 1, 1, tzinfo=now.tzinfo) - timedelta(days=1)
 
 def main():
     summary_types, now = get_summary_types()
-    if not summary_types:
-        logging.info("No summary due at this time.")
-        return
+    for s_type in summary_types:
+        since_date = get_since_date(now, s_type)
+        subs = fetch_convertkit_subscribers(since_date)
+        earnings = fetch_gumroad_earnings(since_date)
 
-    for summary_type in summary_types:
-        start_date = get_start_date(summary_type, now)
-        ck_count = fetch_convertkit_subscribers(start_date)
-        gumroad_earnings = fetch_gumroad_earnings(start_date)
-
-        message = (
-            f"✅ Update Summary ({summary_type.capitalize()} since {start_date})\n"
-            f"- New ConvertKit Subscribers: {ck_count}\n"
-            f"- Gumroad Earnings: {gumroad_earnings}"
+        msg = (
+            f"✅ Update Summary ({s_type.capitalize()} since {since_date.strftime('%d-%b-%Y')})\n"
+            f"- New ConvertKit Subscribers: {subs}\n"
+            f"- Gumroad Earnings: ${earnings:.2f}"
         )
-        send_telegram_message(message)
+        send_telegram_message(msg)
 
 if __name__ == "__main__":
     main()
