@@ -1,29 +1,31 @@
 import requests
-from flask import Flask
+import logging
 
-app = Flask(name)
+# Setup logging
+logging.basicConfig(level=logging.DEBUG)
 
-# Hardcoded "environment variables"
-TELEGRAM_BOT_TOKEN = "7903820907:AAHEwfUQEZMrwkG-bU8kCFZ0fJOAUTDGUuA"  # Replace with your bot token
-TELEGRAM_CHANNEL_ID = "@aiappsselfcreation"              # Use @username or chat_id
-MESSAGE_TEXT = "Hi, this is a message from AI Bot"
-GUMROAD_ACCESS_TOKEN = "2Ot9MDcaOCiQkPZF0vfjGaqIkQEl9NsKmm8Ouzgq29A"  # Your Gumroad access token
-CONVERTKIT_API_KEY = "0C9EKl_OG2Q_xC788hz1lEt2p3algRB2q2OvOcrgpHo"  # Your ConvertKit API key
+# Constants (Hardcoded for debug run)
+TELEGRAM_BOT_TOKEN = "7903820907:AAHEwfUQEZMrwkG-bU8kCFZ0fJOAUTDGUuA"
+TELEGRAM_CHAT_ID = "@aiappsselfcreation"  # Numeric ID is safer on Railway
 
-
-@app.route("/")
-def send_message():
+def send_telegram_message():
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    message_text = "✅ Railway deployment is working! Message sent successfully."
+
     payload = {
-        "chat_id": TELEGRAM_CHANNEL_ID,
-        "text": MESSAGE_TEXT,
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message_text,
     }
 
-    response = requests.post(url, json=payload)
-    if response.status_code == 200:
-        return "✅ Message sent successfully!", 200
-    else:
-        return f"❌ Failed to send message. {response.text}", 500
+    logging.debug(f"Sending to Telegram with payload: {payload}")
+    response = requests.post(url, data=payload)
+    logging.debug(f"Response code: {response.status_code}")
+    logging.debug(f"Response text: {response.text}")
 
-if name == "main":
-    app.run(host="0.0.0.0", port=5000)
+    if response.status_code == 200:
+        print("✅ Message sent successfully!")
+    else:
+        print(f"❌ Failed to send message. Status: {response.status_code}")
+
+if __name__ == "__main__":
+    send_telegram_message()
