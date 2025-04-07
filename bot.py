@@ -1,118 +1,71 @@
 import requests
 import logging
 from datetime import datetime, timedelta
-from time import sleep
 
-# === Logging Config ===
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
+# Setup logging
+logging.basicConfig(level=logging.DEBUG)
 
-# === Constants (Hardcoded) ===
+# Constants (Hardcoded)
 TELEGRAM_BOT_TOKEN = "7903820907:AAHEwfUQEZMrwkG-bU8kCFZ0fJOAUTDGUuA"
 TELEGRAM_CHAT_ID = "@aiappsselfcreation"
 
 CONVERTKIT_API_SECRET = "0C9EKl_OG2Q_xC788hz1lEt2p3algRB2q2OvOcrgpHo"
 GUMROAD_ACCESS_TOKEN = "2Ot9MDcaOCiQkPZF0vfjGaqIkQEl9NsKmm8Ouzgq29A"
 
-# === Retry Wrapper ===
-def retry_request(func, name, retries=3, wait=3):
-    for attempt in range(1, retries + 1):
-        try:
-            return func()
-        except Exception as e:
-            logging.warning(f"[{name}] Attempt {attempt} failed: {e}")
-            if attempt < retries:
-                sleep(wait)
-            else:
-                logging.error(f"[{name}] All attempts failed.")
-                return "N/A"
+# Get date range for yesterday (UTC -5.5)
+def get_yesterday_range():
+    today = datetime.utcnow() - timedelta(hours=5.5)
+    start = datetime(today.year, today.month, today.day) - timedelta(days=1)
+    end = datetime(today.year, today.month, today.day)
+    return start.isoformat() + "Z", end.isoformat() + "Z"
 
-# === ConvertKit Subscribers Count ===
-def fetch_convertkit_subscribers():
-    url = "https://api.convertkit.com/v3/subscribers"
-    params = {
-        "api_secret": CONVERTKIT_API_SECRET
-    }
-    response = requests.get(url, params=params, timeout=10)
-    response.raise_for_status()
+# Fetch ConvertKit subscriber count
+def get_convertkit_subscribers():
+    url = f"https://api.convertkit.com/v3/subscribers?api_secret={CONVERTKIT_API_SECRET}"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        return len(data.get("subscribers", []))
+    except Exception as e:
+        logging.error(f"ConvertKit Error: {e}")
+        return "Error"
 
-    data = response.json()
-    if "subscribers" not in data:
-        raise ValueError("Invalid ConvertKit response structure.")
+# Fetch Gumroad sales total
+def get_gumroad_earnings():
+    start, end = get_yesterday_range()
+    url = f"https://api.gumroad.com/v2/sales?access_token={GUMROAD_ACCESS_TOKEN}&after={start}&before={end}"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        sales = response.json().get("sales", [])
+        total = sum(float(s.get("price", 0)) / 100 for s in sales)
+        return f"${total:.2f}"
+    except Exception as e:
+        logging.error(f"Gumroad Error: {e}")
+        return "Error"
 
-    subscribers = data["subscribers"]
-    cutoff_time = datetime.utcnow() - timedelta(hours=24)
-
-    new_subs_count = 0
-    for sub in subscribers:
-        created_at = sub.get("created_at")
-        if not created_at:
-            continue
-        created_time = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-        if created_time > cutoff_time:
-            new_subs_count += 1
-
-    return new_subs_count
-
-# === Gumroad Earnings ===
-def fetch_gumroad_earnings():
-    url = "https://api.gumroad.com/v2/sales"
-    headers = {
-        "Authorization": f"Bearer {GUMROAD_ACCESS_TOKEN}"
-    }
-    params = {
-        "after": (datetime.utcnow() - timedelta(hours=24)).isoformat()
-    }
-
-    response = requests.get(url, headers=headers, params=params, timeout=10)
-    response.raise_for_status()
-
-    data = response.json()
-    if "sales" not in data:
-        raise ValueError("Invalid Gumroad response structure.")
-
-    total = sum(float(sale.get("price", 0)) / 100 for sale in data["sales"])
-    return f"${total:.2f}"
-
-# === Send Telegram Message ===
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message
-    }
-    response = requests.post(url, data=payload, timeout=10)
-    response.raise_for_status()
-
-    result = response.json()
-    if not result.get("ok"):
-        raise ValueError(f"Telegram error: {result}")
-
-# === Main ===
-def main():
-    logging.info("=== Daily Telegram Update Script Started ===")
-
-    # Retry-protected calls
-    subs = retry_request(fetch_convertkit_subscribers, "ConvertKit")
-    earnings = retry_request(fetch_gumroad_earnings, "Gumroad")
-
-    # Final message
+# Send Telegram message
+def send_telegram_message(subs, earnings):
+    summary_date = (datetime.utcnow() - timedelta(hours=5.5 + 24)).strftime("%d-%b-%Y")
     message = (
-        f"✅ Update Summary\n"
+        f"✅ Update Summary ({summary_date})\n"
         f"- New ConvertKit Subscribers: {subs}\n"
         f"- Gumroad Earnings: {earnings}"
     )
-
-    # Send to Telegram
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+    
     try:
-        send_telegram_message(message)
-        logging.info("[Telegram] Message sent successfully.")
+        logging.debug(f"Sending to Telegram with payload: {payload}")
+        response = requests.post(url, data=payload)
+        response.raise_for_status()
+        logging.debug("Telegram message sent.")
     except Exception as e:
-        logging.error(f"[Telegram] Failed to send message: {e}")
+        logging.error(f"Telegram Error: {e}")
 
-    logging.info("=== Script Execution Complete ===")
-
+# Main
 if __name__ == "__main__":
-    main()
+    subs = get_convertkit_subscribers()
+    earnings = get_gumroad_earnings()
+    send_telegram_message(subs, earnings)
