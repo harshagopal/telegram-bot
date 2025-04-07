@@ -1,12 +1,50 @@
-[
-  {
-    "app": "Harmonic Expert App",
-    "update": "App development completed. Website integration ongoing.",
-    "status": "pending"
-  },
-  {
-    "app": "All-in-One Streaming App",
-    "update": "New UI with compact layout and player switching enhancements.",
-    "status": "pending"
-  }
-]
+{
+  "harmonic_expert_app": [
+    {
+      "title": "App Development",
+      "details": "Harmonic Expert Android app is fully developed and tested.",
+      "status": "Completed",
+      "timestamp": "2025-04-07T08:30:00"
+    },
+    {
+      "title": "Website Frontend",
+      "details": "Working on frontend UI implementation using Tailwind.",
+      "status": "In Progress",
+      "timestamp": "2025-04-07T08:31:00"
+    },
+    {
+      "title": "Website Deployment",
+      "details": "Awaiting domain setup before deployment.",
+      "status": "On Hold",
+      "timestamp": "2025-04-07T08:35:00"
+    }
+  ],
+  "all_in_one_streaming_app": [
+    {
+      "title": "UI Revamp",
+      "details": "Dark mode added, and compact layout completed.",
+      "status": "Completed",
+      "timestamp": "2025-04-07T08:32:00"
+    },
+    {
+      "title": "Link Scraping Verification",
+      "details": "Telegram source parsing failing due to captcha validation.",
+      "status": "Blocked",
+      "timestamp": "2025-04-07T08:38:00"
+    }
+  ],
+  "digital_earnings": [
+    {
+      "title": "YouTube Revenue",
+      "details": "Earnings are increasing steadily.",
+      "status": "Completed",
+      "timestamp": "2025-04-07T08:33:00"
+    },
+    {
+      "title": "Affiliate Marketing",
+      "details": "Results below expectations. Exploring Flipkart and CJ alternatives.",
+      "status": "In Progress",
+      "timestamp": "2025-04-07T08:34:00"
+    }
+  ]
+}
