@@ -7,6 +7,14 @@ BOT_TOKEN = "7903820907:AAHEwfUQEZMrwkG-bU8kCFZ0fJOAUTDGUuA"
 CHAT_ID = "@aiappsselfcreation"
 UPDATES_FILE = "updates.json"
 
+# Emoji mapping based on status
+STATUS_EMOJI = {
+    "completed": "✅",
+    "in progress": "⏳",
+    "blocked": "⚠️",
+    "on hold": "⛔"
+}
+
 def load_updates():
     with open(UPDATES_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -20,7 +28,8 @@ def format_update_message(updates):
         if not pending:
             continue
 
-        message += f"**{app.replace('_', ' ').title()}**\n"
+        message += f"---\n**{app.replace('_', ' ').title()}**\n"
+
         for entry in pending:
             title = entry.get("title", "Untitled Task")
             details = entry.get("details", "")
@@ -28,7 +37,10 @@ def format_update_message(updates):
             timestamp = entry.get("timestamp", "")
             timestamp_fmt = datetime.fromisoformat(timestamp).strftime("%Y-%m-%d %H:%M") if timestamp else "N/A"
 
-            message += f"• {title} [{status}] - {timestamp_fmt}\n  - {details}\n"
+            emoji = STATUS_EMOJI.get(status.lower(), "❔")
+            message += f"{emoji} *{title}* [{status.title()}] - {timestamp_fmt}\n"
+            message += f"  - {details}\n"
+
         message += "\n"
 
     return message.strip()
@@ -47,7 +59,7 @@ def send_telegram_message(message):
 def main():
     updates = load_updates()
     message = format_update_message(updates)
-    
+
     if message.strip():
         send_telegram_message(message)
     else:
