@@ -10,10 +10,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Explicitly copy the Python script
-COPY AIVideoCreatorYoutubeUploader.py .
-
-# Copy any other necessary files
+# Copy all Python files to ensure the script is included
+COPY *.py .
 COPY video_counts.json .
 
 # Command to run the script
