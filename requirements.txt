@@ -3,3 +3,8 @@ pytz
 requests
 gunicorn
 python-telegram-bot
+google-api-python-client==2.84.0
+gtts==2.3.2
+Pillow==10.0.0
+moviepy==1.0.3
+numpy==1.24.3
