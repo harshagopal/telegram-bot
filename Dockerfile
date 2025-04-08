@@ -17,5 +17,5 @@ RUN echo "Files in /app after COPY *.py:" > /app/build_log.txt && ls -la >> /app
 # Copy any other necessary files
 COPY video_counts.json .
 
-# Debug runtime file check
-CMD ["sh", "-c", "ls -la /app && python /app/AIVideoCreatorYoutubeUploader.py"]
+# Command to run the script
+CMD ["python", "AIVideoCreatorYoutubeUploader.py"]
