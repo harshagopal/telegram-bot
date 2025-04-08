@@ -10,9 +10,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all Python files to ensure the script is included
+# Copy all Python files to ensure the script is included, with debug output
 COPY *.py .
+RUN echo "Files in /app after COPY *.py:" > /app/build_log.txt && ls -la >> /app/build_log.txt
+
+# Copy any other necessary files
 COPY video_counts.json .
 
-# Command to run the script
-CMD ["python", "AIVideoCreatorYoutubeUploader.py"]
+# Command to run the script with absolute path for testing
+CMD ["python", "/app/AIVideoCreatorYoutubeUploader.py"]
