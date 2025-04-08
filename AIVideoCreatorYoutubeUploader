@@ -315,4 +315,206 @@ def generate_ai_video(category, video_counts):
             img_byte_arr = img_byte_arr.getvalue()
         except Exception as e:
             logger.error(f"Failed to save image: {e}")
-            img_byte_arr = io.BytesIO(I
+            img_byte_arr = io.BytesIO(Image.new('RGB', (3840, 2160), color='gray').tobytes())
+
+        audio_file = f"audio_{category}_{subcategory}.mp3"
+
+        def generate_audio():
+            try:
+                headers = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"}
+                voice_data = {"text": script, "voice_id": "21m00Tcm4TlvDq8ikWAM"}  # Rachel voice
+                voice_response = requests.post("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", headers=headers, json=voice_data, timeout=15)
+                voice_response.raise_for_status()
+                with open(audio_file, "wb") as f:
+                    f.write(voice_response.content)
+            except Exception as e:
+                logger.error(f"ElevenLabs voice failed: {e}")
+                tts = gTTS(text=script, lang='en-us', tld='us', slow=False)
+                tts.save(audio_file)
+
+        try:
+            with ThreadPoolExecutor() as executor:
+                executor.submit(generate_audio)
+            img_clip = ImageClip(np.array(Image.open(io.BytesIO(img_byte_arr))), duration=30)
+            audio_clip = AudioFileClip(audio_file)
+            final_clip = img_clip.set_audio(audio_clip)
+            final_clip.write_videofile(output_file, codec="libx264", fps=30, bitrate="50000k", logger=None, threads=4)
+        except Exception as e:
+            logger.error(f"Video creation failed: {e}")
+            raise
+
+        with lock:
+            try:
+                if category == "Branding & Growth Strategies" and subcategory == "Storytelling & Facts":
+                    video_counts[category][subcategory][sub_subcategory] = video_num
+                else:
+                    video_counts[category][subcategory] = video_num
+                save_video_counts(video_counts)
+            except Exception as e:
+                logger.error(f"Failed to update video counts: {e}")
+
+        return output_file, script, category, subcategory
+    except Exception as e:
+        logger.critical(f"Critical failure in generate_ai_video for {category}: {e}")
+        return None, f"Error Video {video_num}", category, subcategory
+
+def upload_to_youtube(credentials, video_path, title, description, playlist_title=None):
+    try:
+        max_retries = 5
+        youtube = build('youtube', 'v3', developerKey=credentials["access_token"], cache_discovery=False)
+        playlist_id = None
+
+        if playlist_title:
+            playlist_id = get_playlist_id(youtube, playlist_title)
+            if not playlist_id:
+                logger.warning(f"Playlist '{playlist_title}' not found, uploading without playlist.")
+                playlist_id = None
+
+        for attempt in range(max_retries):
+            try:
+                request_body = {
+                    "snippet": {
+                        "title": title,
+                        "description": description + "\n\nAffiliate Links: [Check our partners at example.com/affiliate]\nSponsorships: Contact harshagmisc@gmail.com for collaborations!",
+                        "tags": [title.replace(" ", "_"), "Sanatana Dharma", "Indian Philosophy"],
+                        "categoryId": "22"
+                    },
+                    "status": {
+                        "privacyStatus": "public"
+                    }
+                }
+                if playlist_id:
+                    request_body["snippet"]["playlistId"] = playlist_id
+
+                request = youtube.videos().insert(
+                    part="snippet,status",
+                    body=request_body,
+                    media_body=MediaFileUpload(video_path)
+                )
+                response = request.execute(num_retries=5)
+                logger.info(f"Video uploaded successfully: {response['id']}")
+
+                if playlist_id:
+                    playlist_item_body = {
+                        "snippet": {
+                            "playlistId": playlist_id,
+                            "resourceId": {
+                                "kind": "youtube#video",
+                                "videoId": response['id']
+                            }
+                        }
+                    }
+                    playlist_request = youtube.playlistItems().insert(
+                        part="snippet",
+                        body=playlist_item_body
+                    ).execute()
+                    logger.info(f"Video added to playlist {playlist_title}: {playlist_request['id']}")
+
+                return True, response
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 401:
+                    refresh_token(credentials)
+                    continue
+                logger.error(f"Upload attempt {attempt + 1} failed: {e}")
+                if attempt == max_retries - 1:
+                    return False, str(e)
+                time.sleep(0.5 * (2 ** attempt))
+    except Exception as e:
+        logger.critical(f"Critical failure in upload_to_youtube: {e}")
+        return False, str(e)
+
+def send_gmail_notification(credentials, subject, body):
+    try:
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                url = "https://www.googleapis.com/gmail/v1/users/me/messages/send"
+                headers = {"Authorization": f"Bearer {credentials['access_token']}", "Content-Type": "application/json"}
+                message = {"raw": base64.urlsafe_b64encode(f"Subject: {subject}\n\n{body}".encode()).decode()}
+                response = requests.post(url, headers=headers, json=message, timeout=5)
+                response.raise_for_status()
+                logger.info("Gmail notification sent successfully.")
+                return True
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 401:
+                    refresh_token(credentials)
+                    continue
+                logger.error(f"Gmail notification attempt {attempt + 1} failed: {e}")
+                if attempt == max_retries - 1:
+                    return False
+                time.sleep(0.5 * (2 ** attempt))
+    except Exception as e:
+        logger.critical(f"Critical failure in send_gmail_notification: {e}")
+        return False
+
+def main():
+    global category_index
+    try:
+        video_counts = load_video_counts()
+
+        while True:
+            try:
+                category = list(CATEGORIES.keys())[category_index % len(CATEGORIES)]
+                
+                with ThreadPoolExecutor() as executor:
+                    future = executor.submit(generate_ai_video, category, video_counts)
+                    video_path, script, final_category, final_subcategory = future.result(timeout=300)  # 5-minute timeout
+                    if video_path is None:
+                        raise ValueError("Video generation failed")
+
+                subcategory = final_subcategory if final_category == "Branding & Growth Strategies" and final_subcategory in ["Storytelling & Facts", "Sponsorship & Brand Deals"] else random.choice(CATEGORIES[final_category])
+                video_num = video_counts[final_category][subcategory] + 1 if subcategory != "Storytelling & Facts" else video_counts[final_category]["Storytelling & Facts"][final_subcategory] + 1
+                title = f"{final_category} - {subcategory} - Video {video_num} - Intriguing Insights"
+                description = f"Explore {final_category} and {subcategory} with this engaging update in stunning 4K. No false claims, only verified wisdom!"
+                playlist_title = f"{final_category} - {subcategory}"
+
+                success, message = upload_to_youtube(YOUTUBE_PLAN_A, video_path, title, description, playlist_title)
+                if not success:
+                    logger.warning("Plan A failed, switching to Plan B")
+                    success, message = upload_to_youtube(YOUTUBE_PLAN_B, video_path, title, description, playlist_title)
+
+                with lock:
+                    try:
+                        if final_category == "Branding & Growth Strategies" and final_subcategory == "Storytelling & Facts":
+                            video_counts[final_category]["Storytelling & Facts"][final_subcategory] += 1
+                        else:
+                            video_counts[final_category][subcategory] += 1
+                        save_video_counts(video_counts)
+                    except Exception as e:
+                        logger.error(f"Failed to update counts for {final_category}/{subcategory}: {e}")
+
+                subject = "YouTube Upload " + ("Success" if success else "Failure")
+                body = f"Video '{title}' upload {'succeeded' if success else 'failed'}: {message}"
+                if not send_gmail_notification(GMAIL_CREDENTIALS, subject, body):
+                    logger.error("Failed to send Gmail notification after retries.")
+
+                category_index += 1
+                if category_index >= len(CATEGORIES):
+                    all_done = all(all(count >= 100 for count in cat_counts.values()) for cat_counts in video_counts.values() if isinstance(cat_counts, dict))
+                    if all_done:
+                        logger.info("All original categories completed, continuing with generated ones.")
+                    category_index = 0
+
+            except (TimeoutError, ValueError) as e:
+                logger.error(f"Execution timeout or value error for {category}: {e}")
+                send_gmail_notification(GMAIL_CREDENTIALS, "Execution Error", f"Timeout or value error for {category}: {e}")
+            except Exception as e:
+                logger.error(f"Main execution failed for {category}: {e}")
+                send_gmail_notification(GMAIL_CREDENTIALS, "Critical Error", f"Script failed for {category}: {e}")
+
+            finally:
+                try:
+                    for file in [video_path, f"audio_{category}_{subcategory}.mp3"]:
+                        if os.path.exists(file):
+                            os.remove(file)
+                except Exception as e:
+                    logger.warning(f"Failed to clean up {file}: {e}")
+
+            time.sleep(0.1)  # Minimal delay for Overdrive
+
+    except Exception as e:
+        logger.critical(f"Critical failure in main loop: {e}")
+        send_gmail_notification(GMAIL_CREDENTIALS, "Critical Failure", f"Script crashed: {e}")
+
+if __name__ == "__main__":
+    main()
