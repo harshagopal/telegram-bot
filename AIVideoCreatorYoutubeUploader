@@ -1,0 +1,318 @@
+import os
+import time
+import random
+import requests
+import logging
+import json
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+from gtts import gTTS
+from PIL import Image, ImageDraw, ImageFont
+import io
+import base64
+import numpy as np
+from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
+import threading
+
+# Logging setup for Railway debugging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Hardcoded Credentials
+GMAIL_CREDENTIALS = {
+    "client_id": "350046852277-da896jddcm7jgoj0q0vrk0v9shjor7l9.apps.googleusercontent.com",
+    "client_secret": "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",
+    "refresh_token": "1//04YhiuDNDBo7hCgYIARAAGAQSNwF-L9IrFoIEFuLh3GNwFmtquTehRyqMYTbrJ4IMdbvyi2ftwDe2msc1pJajj31qqcGf-vkOMUw",
+    "access_token": "ya29.a0AZYkNZiDJRxO57M_X84FVSojtJ5UYoJGklg2f0emuv30dZw99z67RoOOL3uGguar_FiTLV0jI8nvbS8phCWAhVyy3i0EVBoAZ7FLqE-0gRwZNt1r4U-AlqzbLGkqeKph8LkoNIluqzHFa-Pr9HsAB9nW1U4DZoQzT5wXlZOpaCgYKAeQSARESFQHGX2MipFjyraPrmoyni6rRFwNn6w0175"
+}
+
+YOUTUBE_PLAN_A = {
+    "client_id": "160820889531-n0esqor00kr79stf7trkdul7b67acabs.apps.googleusercontent.com",
+    "client_secret": "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",
+    "refresh_token": "1//04Ro32jYbn3SCCgYIARAAGAQSNwF-L9Ir7GzQ52vy3useymmO7uNMdCAu14Zk6cB3AYsE2k4njH4vrkp71xTB16jb4NY3DmCMlSQ",
+    "access_token": "ya29.a0AZYkNZjd8CJIFhpcA_3ASQmNgaTsIUvRE3l0PdqzOEa3bH7uPR9KKS3LPJhIgF-BMO1csv8fC_GiJjSU6gfxfdaKRLmeo3VA2P55rCMZzO9qxt0FJfJzGqofwplRYVRRS0Ex0_EhBL6nxXu6mR2ewwdfN5Mti-vQiOVaq77YaCgYKATMSARESFQHGX2MiJW9UvVKTCuLqSADHamyzJg0175"
+}
+
+YOUTUBE_PLAN_B = {
+    "client_id": "802931507603-9v48iiq95n6i46sjtv92t7gb095vm0mb.apps.googleusercontent.com",
+    "client_secret": "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",
+    "refresh_token": "1//0gCR50xfYuhpwCgYIARAAGBASNwF-L9IrSI_7QFRouzS9c69z32TDXDIvCOrBuMS_hafP05cnE-iTBaHHVJKKOY-z1uTlK8_NtxA",
+    "access_token": "ya29.a0AZYkNZjsQnIU6XU-ceDhBMGBmlbBJ7crzhenXOHFDxc1isciqVE3sa-Ap6t0bfwXjVRV9JXaE26fet4HTnmFSz2zhlB_d_G_pvRn5mFnAsZNcrgMpcApuyX46czkUmAOK-irDaHGAxSpSdpZrJLFBcvmy7LyOBTDJirXvUAnaCgYKAc0SARESFQHGX2MipnMetkuyNtkF-dbd75iIzg0175"
+}
+
+# ElevenLabs API Key
+ELEVENLABS_API_KEY = "sk_50a5f87e18e0150ab0cd71e703c0e08561deef6e7d0db668"
+
+# Main Categories and Their Subcategories
+CATEGORIES = {
+    "Motivation & Success": ["Motivation & Success Stories"],
+    "Tech & Innovation": ["Tech News & AI Updates"],
+    "Finance & Investments": ["Finance & Stock Market Tips"],
+    "Health & Wellness": ["Relaxing Music & Meditation"],
+    "Branding & Growth Strategies": ["Storytelling & Facts", "Sponsorship & Brand Deals"],
+    "Productivity & Self-Improvement": ["Side Hustle You Can Start For Free", "Learning New Skills with AI", "Best Free Software for Work & Study", "Time Management & Productivity Hacks"],
+    "Content Creation & Social Media Growth": ["Best Affiliate Marketing Strategies", "Blogging & SEO for Maximum Traffic", "AI Tools for Content Creation", "Instagram, Twitter, LinkedIn Automation", "YouTube Growth & Monetization"],
+    "Digital Products Monetization": ["Print-on-Demand & Dropshipping", "Best Marketplaces to Sell Digital Products", "How to Sell Templates & Digital Assets", "Ebooks & Online Courses"],
+    "Business & Finance": ["Freelancing & Remote Work", "Personal Finance & Investment Tips", "Cryptocurrency & Blockchain Basics", "Stock Market & Trading Insights", "Passive Income Strategies"],
+    "Tech & Gadgets": ["AI Tools & SaaS Platforms", "Software & Tool Comparisons", "Best Tech Deals & Discounts", "Unboxing & First Impressions", "Reviews and Ratings"],
+    "Software Development": ["Cloud Computing & DevOps", "AI & Machine Learning Projects", "Mobile App Development", "Web Development", "Python", "Java"]
+}
+
+# Subcategories under "Storytelling & Facts" (under "Branding & Growth Strategies")
+STORYTELLING_SUBTOPICS = {
+    "Upanishads": ["All 108 mentioned", "Detailed summaries for 10 prominent ones"],
+    "Vedas": ["Each Veda covered individually", "Summary for the most influential"],
+    "Agamas": ["Core principles", "Temple architecture", "Rituals"],
+    "Puranas": ["Standalone stories from each Purana", "Summary of major Puranas (e.g., Bhagavata, Vishnu, Shiva)"],
+    "Ramayana Perspectives": ["Rama’s perspective", "Sita’s perspective", "Lakshmana’s perspective", "Ravana’s perspective", "Hanuman’s perspective", "Key morals and cultural wisdom"],
+    "Mahabharata Perspectives": ["Krishna’s perspective", "Yudhishthira/Dharmaraya’s perspective", "Bhima’s perspective", "Bhishma’s perspective", "Duryodhana’s perspective", "Moral interpretations"],
+    "Teachings of Spiritual Masters": ["Adi Shankaracharya", "Ramanujacharya", "Madhvacharya"],
+    "Sanatana Dharma vs Science vs World Cultures": ["Analogies with Greek, Egyptian, Mesopotamian, Chinese, Mayan, etc.", "Evidence-backed insights only", "Avoidance of controversial or biased conclusions"],
+    "Influence of Sanatana Dharma on the World": ["Over 30 topics (e.g., yoga, philosophy, mathematics, astronomy, etc.)"],
+    "Ancient Legends & Rare Facts": ["Fascinating, lesser-known stories with verified sources"],
+    "Moral Stories": ["Short, impactful lessons from Indian epics and folklore"],
+    "Sanatana Dharma Today": ["Modern relevance", "Global impact", "Philosophical depth"]
+}
+
+# Video count tracking file
+VIDEO_COUNTS_FILE = "video_counts.json"
+
+# Load or initialize video counts
+def load_video_counts():
+    try:
+        if os.path.exists(VIDEO_COUNTS_FILE):
+            with open(VIDEO_COUNTS_FILE, 'r') as f:
+                return json.load(f)
+        counts = {cat: {sub: 0 for sub in subs} for cat, subs in CATEGORIES.items()}
+        counts["Branding & Growth Strategies"]["Storytelling & Facts"] = {sub: 0 for sub in STORYTELLING_SUBTOPICS}
+        counts["Generated Categories"] = {}
+        with open(VIDEO_COUNTS_FILE, 'w') as f:
+            json.dump(counts, f)  # Create file if it doesn't exist
+        return counts
+    except Exception as e:
+        logger.error(f"Failed to load or create video_counts.json: {e}")
+        return {cat: {sub: 0 for sub in subs} for cat, subs in CATEGORIES.items()}  # Fallback to default
+
+def save_video_counts(counts):
+    try:
+        with open(VIDEO_COUNTS_FILE, 'w') as f:
+            json.dump(counts, f)
+    except Exception as e:
+        logger.error(f"Failed to save video_counts.json: {e}")
+
+# AI-like category generator
+def generate_new_category(existing_categories):
+    try:
+        themes = ["Science", "History", "Art", "Nature", "Technology", "Culture", "Philosophy", "Adventure", "Health", "Education"]
+        descriptors = ["Insights", "Chronicles", "Explorations", "Discoveries", "Trends", "Stories", "Breakthroughs", "Journeys"]
+        new_category = f"{random.choice(themes)} {random.choice(descriptors)}"
+        while new_category in existing_categories:
+            new_category = f"{random.choice(themes)} {random.choice(descriptors)}"
+        return new_category
+    except Exception as e:
+        logger.error(f"Failed to generate new category: {e}")
+        return f"NewCategory_{int(time.time())}"  # Fallback
+
+def generate_new_subcategories(category):
+    try:
+        sub_themes = ["Basics", "Advanced", "History", "Future", "Tips", "Secrets", "Myths", "Facts", "Innovations", "Lessons"]
+        return [f"{category.split()[0]} {sub}" for sub in random.sample(sub_themes, 5)]
+    except Exception as e:
+        logger.error(f"Failed to generate new subcategories: {e}")
+        return [f"{category.split()[0]} Fallback{sub}" for sub in range(5)]
+
+# Global counter for round-robin
+category_index = 0
+lock = threading.Lock()
+
+def refresh_token(credentials):
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            url = "https://oauth2.googleapis.com/token"
+            data = {
+                "client_id": credentials["client_id"],
+                "client_secret": credentials["client_secret"],
+                "refresh_token": credentials["refresh_token"],
+                "grant_type": "refresh_token"
+            }
+            response = requests.post(url, data=data, timeout=5)
+            response.raise_for_status()
+            new_token = response.json()["access_token"]
+            credentials["access_token"] = new_token
+            logger.info("Token refreshed successfully.")
+            return new_token
+        except (requests.exceptions.RequestException, KeyError) as e:
+            logger.error(f"Token refresh attempt {attempt + 1} failed: {e}")
+            if attempt == max_retries - 1:
+                logger.critical("Max retries reached for token refresh, proceeding with last known token.")
+                return credentials["access_token"]  # Fallback to last known token
+            time.sleep(0.5 * (2 ** attempt))
+
+def get_playlist_id(youtube, playlist_title):
+    try:
+        request = youtube.playlists().list(
+            part="snippet",
+            mine=True,
+            maxResults=50
+        )
+        response = request.execute()
+        for item in response.get('items', []):
+            if item['snippet']['title'] == playlist_title:
+                return item['id']
+        return None
+    except Exception as e:
+        logger.error(f"Failed to get playlist ID for {playlist_title}: {e}")
+        return None
+
+def generate_unique_script(category, subcategory, sub_subcategory, video_num):
+    try:
+        intros = [
+            f"Video {video_num}: Curious about", f"Video {video_num}: Ever wondered", f"Video {video_num}: What if",
+            f"Video {video_num}: Dive into", f"Video {video_num}: Explore", f"Video {video_num}: Uncover"
+        ]
+        actions = [
+            "discover this intriguing insight", "unveil this hidden truth", "learn this intuitive lesson",
+            "explore this fascinating fact", "dig into this curious tale", "master this engaging concept"
+        ]
+        endings = [
+            f"#{video_num} today!", f"#{video_num} now!", f"#{video_num} with us!", f"in this stunning reveal #{video_num}!"
+        ]
+
+        if category == "Branding & Growth Strategies" and subcategory == "Storytelling & Facts":
+            specifics = {
+                "Upanishads": f"the Upanishads’ wisdom on {sub_subcategory} #{video_num}",
+                "Vedas": f"the Vedas’ secrets about {sub_subcategory} #{video_num}",
+                "Agamas": f"Agamas’ principles of {sub_subcategory} #{video_num}",
+                "Puranas": f"the Puranas’ stories on {sub_subcategory} #{video_num}",
+                "Ramayana Perspectives": f"a Ramayana perspective on {sub_subcategory} #{video_num}",
+                "Mahabharata Perspectives": f"a Mahabharata insight on {sub_subcategory} #{video_num}",
+                "Teachings of Spiritual Masters": f"a teaching by {sub_subcategory} #{video_num}",
+                "Sanatana Dharma vs Science vs World Cultures": f"Sanatana Dharma’s comparison with {sub_subcategory} #{video_num}",
+                "Influence of Sanatana Dharma on the World": f"Sanatana Dharma’s impact on {sub_subcategory} #{video_num}",
+                "Ancient Legends & Rare Facts": f"an ancient legend about {sub_subcategory} #{video_num}",
+                "Moral Stories": f"a moral lesson from {sub_subcategory} #{video_num}",
+                "Sanatana Dharma Today": f"Sanatana Dharma’s {sub_subcategory} today #{video_num}"
+            }
+            return f"{random.choice(intros)} {specifics[subcategory]}? {random.choice(actions)} {random.choice(endings)}"
+        else:
+            specifics = {
+                "Motivation & Success Stories": f"success strategies in {subcategory} #{video_num}",
+                "Tech News & AI Updates": f"tech updates on {subcategory} #{video_num}",
+                "Finance & Stock Market Tips": f"financial tips for {subcategory} #{video_num}",
+                "Relaxing Music & Meditation": f"wellness techniques in {subcategory} #{video_num}",
+                "Sponsorship & Brand Deals": f"branding strategies for {subcategory} #{video_num}",
+                "Side Hustle You Can Start For Free": f"free side hustles like {subcategory} #{video_num}",
+                "Learning New Skills with AI": f"AI skills in {subcategory} #{video_num}",
+                "Best Free Software for Work & Study": f"software for {subcategory} #{video_num}",
+                "Time Management & Productivity Hacks": f"productivity tips for {subcategory} #{video_num}",
+                "Best Affiliate Marketing Strategies": f"affiliate strategies in {subcategory} #{video_num}",
+                "Blogging & SEO for Maximum Traffic": f"SEO techniques for {subcategory} #{video_num}",
+                "AI Tools for Content Creation": f"AI tools for {subcategory} #{video_num}",
+                "Instagram, Twitter, LinkedIn Automation": f"social media automation for {subcategory} #{video_num}",
+                "YouTube Growth & Monetization": f"YouTube growth in {subcategory} #{video_num}",
+                "Print-on-Demand & Dropshipping": f"digital sales in {subcategory} #{video_num}",
+                "Best Marketplaces to Sell Digital Products": f"marketplaces for {subcategory} #{video_num}",
+                "How to Sell Templates & Digital Assets": f"selling strategies for {subcategory} #{video_num}",
+                "Ebooks & Online Courses": f"content creation for {subcategory} #{video_num}",
+                "Freelancing & Remote Work": f"remote work tips for {subcategory} #{video_num}",
+                "Personal Finance & Investment Tips": f"investment advice for {subcategory} #{video_num}",
+                "Cryptocurrency & Blockchain Basics": f"crypto basics in {subcategory} #{video_num}",
+                "Stock Market & Trading Insights": f"trading insights for {subcategory} #{video_num}",
+                "Passive Income Strategies": f"passive income in {subcategory} #{video_num}",
+                "AI Tools & SaaS Platforms": f"AI platforms for {subcategory} #{video_num}",
+                "Software & Tool Comparisons": f"software comparisons for {subcategory} #{video_num}",
+                "Best Tech Deals & Discounts": f"tech deals in {subcategory} #{video_num}",
+                "Unboxing & First Impressions": f"first impressions of {subcategory} #{video_num}",
+                "Reviews and Ratings": f"reviews for {subcategory} #{video_num}",
+                "Cloud Computing & DevOps": f"cloud solutions in {subcategory} #{video_num}",
+                "AI & Machine Learning Projects": f"AI projects for {subcategory} #{video_num}",
+                "Mobile App Development": f"app development in {subcategory} #{video_num}",
+                "Web Development": f"web tech for {subcategory} #{video_num}",
+                "Python": f"Python skills in {subcategory} #{video_num}",
+                "Java": f"Java expertise in {subcategory} #{video_num}"
+            }
+            return f"{random.choice(intros)} {specifics[subcategory]}? {random.choice(actions)} {random.choice(endings)}"
+    except Exception as e:
+        logger.error(f"Failed to generate script for {category}/{subcategory}: {e}")
+        return f"Video {video_num}: Explore something new? discover this #{video_num} now!"
+
+def generate_dynamic_script(category, subcategory, sub_subcategory, video_num):
+    try:
+        intros = [
+            f"Video {video_num}: Curious about", f"Video {video_num}: Ever wondered", f"Video {video_num}: What if"
+        ]
+        actions = [
+            "discover this intriguing insight", "unveil this hidden truth", "learn this intuitive lesson"
+        ]
+        return f"{random.choice(intros)} {subcategory.lower()} in {category.lower()} with focus on {sub_subcategory.lower()}? {random.choice(actions)} #{video_num} now!"
+    except Exception as e:
+        logger.error(f"Failed to generate dynamic script for {category}/{subcategory}: {e}")
+        return f"Video {video_num}: Something new? discover this #{video_num} now!"
+
+def generate_ai_video(category, video_counts):
+    try:
+        with lock:
+            subcategory = random.choice(list(CATEGORIES[category]))
+            if category == "Branding & Growth Strategies" and subcategory == "Storytelling & Facts":
+                sub_subcategory = random.choice(list(STORYTELLING_SUBTOPICS.keys()))
+                detail = random.choice(STORYTELLING_SUBTOPICS[sub_subcategory])
+                video_num = video_counts[category][subcategory][sub_subcategory] + 1
+                if video_num >= 100:
+                    new_cat = generate_new_category(list(CATEGORIES.keys()) + list(video_counts["Generated Categories"].keys()))
+                    if new_cat not in video_counts["Generated Categories"]:
+                        video_counts["Generated Categories"][new_cat] = {sub: 0 for sub in generate_new_subcategories(new_cat)}
+                    category, subcategory, sub_subcategory = new_cat, random.choice(list(video_counts["Generated Categories"][new_cat].keys())), 0
+                    script = generate_dynamic_script(category, subcategory, "new topic", video_num)
+                else:
+                    script = generate_unique_script(category, subcategory, detail, video_num)
+            else:
+                video_num = video_counts[category][subcategory] + 1
+                if video_num >= 100:
+                    new_cat = generate_new_category(list(CATEGORIES.keys()) + list(video_counts["Generated Categories"].keys()))
+                    if new_cat not in video_counts["Generated Categories"]:
+                        video_counts["Generated Categories"][new_cat] = {sub: 0 for sub in generate_new_subcategories(new_cat)}
+                    category, subcategory = new_cat, random.choice(list(video_counts["Generated Categories"][new_cat].keys()))
+                    script = generate_dynamic_script(category, subcategory, "new topic", video_num)
+                else:
+                    script = generate_unique_script(category, subcategory, "general", video_num)
+
+        output_file = f"video_{category.replace(' ', '_')}_{subcategory.replace(' ', '_')}_{int(time.time())}.mp4"
+
+        # Generate assets with high-quality, human-like elements
+        try:
+            face_response = requests.get("https://thispersondoesnotexist.com", timeout=5)
+            face_response.raise_for_status()
+            face_img = Image.open(io.BytesIO(face_response.content)).resize((1920, 2160), Image.LANCZOS)
+        except Exception as e:
+            logger.error(f"Failed to fetch face: {e}")
+            face_img = Image.new('RGB', (1920, 2160), color='gray')
+
+        try:
+            bg_response = requests.post("https://backend.craiyon.com/generate", json={"prompt": script}, timeout=15)
+            bg_response.raise_for_status()
+            bg_url = bg_response.json()["images"][0]
+            bg_data = requests.get(bg_url, timeout=15).content
+            bg_img = Image.open(io.BytesIO(bg_data)).resize((1920, 2160), Image.LANCZOS)
+        except Exception as e:
+            logger.error(f"Failed to generate background: {e}")
+            bg_img = Image.new('RGB', (1920, 2160), color=(200, 200, 255))
+
+        final_img = Image.new('RGB', (3840, 2160))
+        final_img.paste(bg_img, (0, 0))
+        final_img.paste(face_img, (1920, 0))
+        try:
+            draw = ImageDraw.Draw(final_img)
+            font = ImageFont.truetype("arial.ttf", 40) if os.path.exists("arial.ttf") else ImageFont.load_default()
+            draw.text((20, 20), script[:50] + "...", fill='white', font=font)
+        except Exception as e:
+            logger.error(f"Failed to draw text on image: {e}")
+
+        img_byte_arr = io.BytesIO()
+        try:
+            final_img.save(img_byte_arr, format='PNG')
+            img_byte_arr = img_byte_arr.getvalue()
+        except Exception as e:
+            logger.error(f"Failed to save image: {e}")
+            img_byte_arr = io.BytesIO(I
