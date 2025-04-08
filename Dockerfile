@@ -10,13 +10,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all Python files and verify with detailed logging
-COPY *.py .
-RUN echo "Files in /app after COPY *.py:" > /app/build_log.txt && ls -la >> /app/build_log.txt && \
-    if [ ! -f AIVideoCreatorYoutubeUploader.py ]; then echo "Error: AIVideoCreatorYoutubeUploader.py not found" && exit 1; fi
+# Explicitly copy the Python script and verify
+COPY AIVideoCreatorYoutubeUploader.py .
+RUN if [ ! -f AIVideoCreatorYoutubeUploader.py ]; then echo "Error: AIVideoCreatorYoutubeUploader.py not found" && exit 1; fi
+RUN echo "Files in /app after COPY:" > /app/build_log.txt && ls -la >> /app/build_log.txt
 
 # Copy any other necessary files
 COPY video_counts.json .
 
-# Command to run the script with debug output at runtime
-CMD ["sh", "-c", "echo 'Runtime files in /app:' && ls -la /app && python /app/AIVideoCreatorYoutubeUploader.py"]
+# Command to run the script
+CMD ["python", "AIVideoCreatorYoutubeUploader.py"]
