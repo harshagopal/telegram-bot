@@ -14,4 +14,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Command to run the script
-CMD ["python", "your_script.py"]
+CMD ["python", "AIVideoCreatorYoutubeUploader.py"]
