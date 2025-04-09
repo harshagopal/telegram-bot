@@ -26,12 +26,17 @@ RUN if [ ! -f uploader.py ]; then \
     if [ -z "$PYTHON_SCRIPT" ]; then echo "Error: No Python script found" && exit 1; else echo "Found alternative script: $PYTHON_SCRIPT"; fi; \
     fi
 
-# Create a directory for logs with minimal permissions
+# Create a directory for logs with minimal permissions and ensure it’s writable
 RUN mkdir -p /app/logs && chmod 755 /app/logs
 
-# Command to run the script with logging to file and stdout, optimized for free tier
-CMD ["sh", "-c", "echo 'Starting script execution: $(date)' > /app/logs/runtime.log 2>/dev/null && \
+# Command to run the script with logging to file and stdout, appending logs
+CMD ["sh", "-c", "echo 'Starting script execution: $(date)' >> /app/logs/runtime.log 2>/dev/null && \
      echo 'Starting script execution: $(date)' && \
      if [ -n \"$PYTHON_SCRIPT\" ]; then python $PYTHON_SCRIPT >> /app/logs/runtime.log 2>&1; else python uploader.py >> /app/logs/runtime.log 2>&1; fi && \
      echo 'Script execution completed: $(date)' >> /app/logs/runtime.log 2>/dev/null && \
-     echo 'Script execution completed: $(date)'"]
+     echo 'Script execution completed: $(date)' && \
+     cat /app/logs/runtime.log /app/deployment.log /app/deployment_diagnostics.log >> /app/combined_logs.log 2>/dev/null || echo 'Failed to combine logs'"]
+
+# Optional: Health check (commented out, enable if needed)
+# HEALTHCHECK --interval=30s --timeout=3s \
+#   CMD curl -f http://localhost/ || exit 1
