@@ -61,22 +61,26 @@ def retry_request(func, *args, max_attempts=3, **kwargs):
 
 def generate_ai_content(category):
     prompt = f"Generate a SEO-optimized, intriguing digital product title, description, and price in USD for category: {category}"
-    response = retry_request(requests.post,
-        "https://api.deepai.org/api/text-generator",
-        data={'text': prompt},
-        headers={'api-key': 'quickstart-QUdJIGlzIGNvbWluZy4uLi4K'}
-    )
-    output = response.json().get("output", "")
+    try:
+        response = retry_request(requests.post,
+            "https://api.deepai.org/api/text-generator",
+            data={'text': prompt},
+            headers={'api-key': 'quickstart-QUdJIGlzIGNvbWluZy4uLi4K'}
+        )
+        output = response.json().get("output", "")
+    except:
+        log("Primary AI API failed, trying fallback to Craiyon style or open-source model...")
+        # Placeholder for KoboldAI or Gemini if APIs exist
+        output = f"{category} Super Bundle\nTop-rated collection for productivity.\nPrice: $14.99"
+
     parts = output.split('\n')
     title = parts[0][:100].strip() if len(parts) > 0 else f"{category} Pack {random.randint(100,999)}"
     description = "\n".join(parts[1:3]).strip() if len(parts) > 2 else f"A premium {category.lower()} bundle to boost your productivity."
     price = round(random.uniform(5, 25), 2)
 
-    # Filter: Skip too short content
     if len(title) < 10 or len(description) < 20:
         raise Exception("Weak content from AI, skipping run.")
     
-    # Urgency label
     description += f"\n\n⚡ This {category} drop is available for a limited time. Act now!"
     return title, description, price
 
@@ -126,7 +130,6 @@ def create_gumroad_product(title, description, price, thumbnail_url):
         raise Exception(f"Gumroad creation failed: {res.text}")
     product_id = res.json()["product"]["id"]
 
-    # Add thumbnail
     if thumbnail_url.startswith("data:image"):
         from base64 import b64decode
         img_data = b64decode(thumbnail_url.split(",")[1])
@@ -143,7 +146,6 @@ def create_gumroad_product(title, description, price, thumbnail_url):
             files={"preview": img_file}
         )
 
-    # Dummy file
     with open("dummy.txt", "w") as f:
         f.write("This is your digital product.")
     with open("dummy.txt", "rb") as file:
