@@ -1,1 +1,73 @@
-testdata
+{
+  "Motivation & Success": {
+    "Motivation & Success Stories": 0
+  },
+  "Tech & Innovation": {
+    "Tech News & AI Updates": 0
+  },
+  "Finance & Investments": {
+    "Finance & Stock Market Tips": 0
+  },
+  "Health & Wellness": {
+    "Relaxing Music & Meditation": 0
+  },
+  "Branding & Growth Strategies": {
+    "Storytelling & Facts": {
+      "Upanishads": 0,
+      "Vedas": 0,
+      "Agamas": 0,
+      "Puranas": 0,
+      "Ramayana Perspectives": 0,
+      "Mahabharata Perspectives": 0,
+      "Teachings of Spiritual Masters": 0,
+      "Sanatana Dharma vs Science vs World Cultures": 0,
+      "Influence of Sanatana Dharma on the World": 0,
+      "Ancient Legends & Rare Facts": 0,
+      "Moral Stories": 0,
+      "Sanatana Dharma Today": 0
+    },
+    "Sponsorship & Brand Deals": 0
+  },
+  "Productivity & Self-Improvement": {
+    "Side Hustle You Can Start For Free": 0,
+    "Learning New Skills with AI": 0,
+    "Best Free Software for Work & Study": 0,
+    "Time Management & Productivity Hacks": 0
+  },
+  "Content Creation & Social Media Growth": {
+    "Best Affiliate Marketing Strategies": 0,
+    "Blogging & SEO for Maximum Traffic": 0,
+    "AI Tools for Content Creation": 0,
+    "Instagram, Twitter, LinkedIn Automation": 0,
+    "YouTube Growth & Monetization": 0
+  },
+  "Digital Products Monetization": {
+    "Print-on-Demand & Dropshipping": 0,
+    "Best Marketplaces to Sell Digital Products": 0,
+    "How to Sell Templates & Digital Assets": 0,
+    "Ebooks & Online Courses": 0
+  },
+  "Business & Finance": {
+    "Freelancing & Remote Work": 0,
+    "Personal Finance & Investment Tips": 0,
+    "Cryptocurrency & Blockchain Basics": 0,
+    "Stock Market & Trading Insights": 0,
+    "Passive Income Strategies": 0
+  },
+  "Tech & Gadgets": {
+    "AI Tools & SaaS Platforms": 0,
+    "Software & Tool Comparisons": 0,
+    "Best Tech Deals & Discounts": 0,
+    "Unboxing & First Impressions": 0,
+    "Reviews and Ratings": 0
+  },
+  "Software Development": {
+    "Cloud Computing & DevOps": 0,
+    "AI & Machine Learning Projects": 0,
+    "Mobile App Development": 0,
+    "Web Development": 0,
+    "Python": 0,
+    "Java": 0
+  },
+  "Generated Categories": {}
+}
