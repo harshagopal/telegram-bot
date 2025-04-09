@@ -13,10 +13,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy all files and debug directory contents
 COPY . .
 RUN echo "Files in /app after COPY:" > /app/build_log.txt && ls -la >> /app/build_log.txt
+
+# Check for uploader.py and set fallback script if not found
 RUN if [ ! -f uploader.py ]; then \
     echo "Warning: uploader.py not found, checking for alternatives" && \
-    for file in *.py; do [ -f "$file" ] && export PYTHON_SCRIPT=$file && break; done && \
-    [ -z "$PYTHON_SCRIPT\" ] && echo \"Error: No Python script found\" && exit 1 || echo \"Found alternative script: $PYTHON_SCRIPT\"; \
+    for file in *.py; do [ -f "$file" ] && export PYTHON_SCRIPT="$file" && break; done && \
+    if [ -z "$PYTHON_SCRIPT" ]; then echo "Error: No Python script found" && exit 1; else echo "Found alternative script: $PYTHON_SCRIPT"; fi; \
     fi
 
 # Command to run the script (use detected script if fallback triggered)
