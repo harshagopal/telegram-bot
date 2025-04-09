@@ -20,8 +20,8 @@ logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(module)s - %(funcName)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),  # Console output for runtime
-        logging.FileHandler('deployment_diagnostics.log')  # File for deployment logs
+        logging.StreamHandler(),  # Stream to stdout for Railway logs
+        logging.FileHandler('/app/logs/runtime.log')  # File for persistence
     ]
 )
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Deployment-specific logger
 deployment_logger = logging.getLogger('deployment')
 deployment_logger.setLevel(logging.INFO)
-deployment_logger.addHandler(logging.FileHandler('deployment.log'))
+deployment_logger.addHandler(logging.FileHandler('/app/logs/deployment.log'))
 
 # Hardcoded Credentials
 GMAIL_CREDENTIALS = {
@@ -88,7 +88,7 @@ STORYTELLING_SUBTOPICS = {
 }
 
 # Video count tracking file
-VIDEO_COUNTS_FILE = "video_counts.json"
+VIDEO_COUNTS_FILE = "/app/video_counts.json"
 
 # Load or initialize video counts
 def load_video_counts():
@@ -262,6 +262,7 @@ def generate_unique_script(category, subcategory, sub_subcategory, video_num):
             return f"{random.choice(intros)} {specifics[subcategory]}? {random.choice(actions)} {random.choice(endings)}"
     except Exception as e:
         logger.error(f"Failed to generate script for {category}/{subcategory}: {e}")
+        print(f"Error generating script: {e}", flush=True)  # Force stdout for Railway
         return f"Video {video_num}: Explore something new? discover this #{video_num} now!"
 
 def generate_dynamic_script(category, subcategory, sub_subcategory, video_num):
@@ -276,8 +277,8 @@ def generate_dynamic_script(category, subcategory, sub_subcategory, video_num):
         return f"{random.choice(intros)} {subcategory.lower()} in {category.lower()} with focus on {sub_subcategory.lower()}? {random.choice(actions)} #{video_num} now!"
     except Exception as e:
         logger.error(f"Failed to generate dynamic script for {category}/{subcategory}: {e}")
+        print(f"Error generating dynamic script: {e}", flush=True)  # Force stdout for Railway
         return f"Video {video_num}: Something new? discover this #{video_num} now!"
-
 def generate_ai_video(category, video_counts):
     try:
         logger.info(f"Starting video generation for category: {category}")
@@ -321,6 +322,7 @@ def generate_ai_video(category, video_counts):
             face_img = Image.open(io.BytesIO(face_response.content)).resize((1920, 2160), Image.LANCZOS)
         except Exception as e:
             logger.error(f"Failed to fetch face: {e}")
+            print(f"Error fetching face: {e}", flush=True)  # Force stdout for Railway
             face_img = Image.new('RGB', (1920, 2160), color='gray')
 
         try:
@@ -332,6 +334,7 @@ def generate_ai_video(category, video_counts):
             bg_img = Image.open(io.BytesIO(bg_data)).resize((1920, 2160), Image.LANCZOS)
         except Exception as e:
             logger.error(f"Failed to generate background: {e}")
+            print(f"Error generating background: {e}", flush=True)  # Force stdout for Railway
             bg_img = Image.new('RGB', (1920, 2160), color=(200, 200, 255))
 
         final_img = Image.new('RGB', (3840, 2160))
@@ -344,6 +347,7 @@ def generate_ai_video(category, video_counts):
             draw.text((20, 20), script[:50] + "...", fill='white', font=font)
         except Exception as e:
             logger.error(f"Failed to draw text on image: {e}")
+            print(f"Error drawing text: {e}", flush=True)  # Force stdout for Railway
 
         img_byte_arr = io.BytesIO()
         try:
@@ -352,6 +356,7 @@ def generate_ai_video(category, video_counts):
             img_byte_arr = img_byte_arr.getvalue()
         except Exception as e:
             logger.error(f"Failed to save image: {e}")
+            print(f"Error saving image: {e}", flush=True)  # Force stdout for Railway
             img_byte_arr = io.BytesIO(Image.new('RGB', (3840, 2160), color='gray').tobytes())
 
         audio_file = f"audio_{category}_{subcategory}.mp3"
@@ -367,6 +372,7 @@ def generate_ai_video(category, video_counts):
                     f.write(voice_response.content)
             except Exception as e:
                 logger.error(f"ElevenLabs voice failed: {e}")
+                print(f"Error generating audio: {e}", flush=True)  # Force stdout for Railway
                 tts = gTTS(text=script, lang='en-us', tld='us', slow=False)
                 tts.save(audio_file)
 
@@ -381,6 +387,7 @@ def generate_ai_video(category, video_counts):
             logger.info(f"Video successfully created: {output_file}")
         except Exception as e:
             logger.error(f"Video creation failed: {e}")
+            print(f"Error creating video: {e}", flush=True)  # Force stdout for Railway
             raise
 
         with lock:
@@ -393,12 +400,13 @@ def generate_ai_video(category, video_counts):
                 save_video_counts(video_counts)
             except Exception as e:
                 logger.error(f"Failed to update video counts: {e}")
+                print(f"Error updating video counts: {e}", flush=True)  # Force stdout for Railway
 
         return output_file, script, category, subcategory
     except Exception as e:
         logger.critical(f"Critical failure in generate_ai_video for {category}: {e}")
+        print(f"Critical failure in video generation: {e}", flush=True)  # Force stdout for Railway
         return None, f"Error Video {video_num}", category, subcategory
-
 
 def upload_to_youtube(credentials, video_path, title, description, playlist_title=None):
     try:
@@ -412,6 +420,7 @@ def upload_to_youtube(credentials, video_path, title, description, playlist_titl
             playlist_id = get_playlist_id(youtube, playlist_title)
             if not playlist_id:
                 logger.warning(f"Playlist '{playlist_title}' not found, uploading without playlist.")
+                print(f"Warning: Playlist {playlist_title} not found", flush=True)  # Force stdout for Railway
                 playlist_id = None
 
         for attempt in range(max_retries):
@@ -438,6 +447,7 @@ def upload_to_youtube(credentials, video_path, title, description, playlist_titl
                 )
                 response = request.execute(num_retries=5)
                 logger.info(f"Video uploaded successfully: {response['id']}")
+                print(f"Video uploaded: {response['id']}", flush=True)  # Force stdout for Railway
 
                 if playlist_id:
                     logger.debug(f"Adding video to playlist {playlist_title}")
@@ -455,19 +465,23 @@ def upload_to_youtube(credentials, video_path, title, description, playlist_titl
                         body=playlist_item_body
                     ).execute()
                     logger.info(f"Video added to playlist {playlist_title}: {playlist_request['id']}")
+                    print(f"Video added to playlist {playlist_title}", flush=True)  # Force stdout for Railway
 
                 return True, response
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 401:
                     logger.warning(f"401 error detected, refreshing token for attempt {attempt + 1}")
+                    print(f"401 error, refreshing token", flush=True)  # Force stdout for Railway
                     refresh_token(credentials)
                     continue
                 logger.error(f"Upload attempt {attempt + 1} failed: {e}")
+                print(f"Upload failed: {e}", flush=True)  # Force stdout for Railway
                 if attempt == max_retries - 1:
                     return False, str(e)
                 time.sleep(0.5 * (2 ** attempt))
     except Exception as e:
         logger.critical(f"Critical failure in upload_to_youtube for {title}: {e}")
+        print(f"Critical upload failure: {e}", flush=True)  # Force stdout for Railway
         return False, str(e)
 
 def send_gmail_notification(credentials, subject, body):
@@ -482,18 +496,22 @@ def send_gmail_notification(credentials, subject, body):
                 response = requests.post(url, headers=headers, json=message, timeout=5)
                 response.raise_for_status()
                 logger.info("Gmail notification sent successfully.")
+                print(f"Gmail notification sent: {subject}", flush=True)  # Force stdout for Railway
                 return True
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 401:
                     logger.warning(f"401 error detected, refreshing token for Gmail attempt {attempt + 1}")
+                    print(f"401 error for Gmail, refreshing token", flush=True)  # Force stdout for Railway
                     refresh_token(credentials)
                     continue
                 logger.error(f"Gmail notification attempt {attempt + 1} failed: {e}")
+                print(f"Gmail notification failed: {e}", flush=True)  # Force stdout for Railway
                 if attempt == max_retries - 1:
                     return False
                 time.sleep(0.5 * (2 ** attempt))
     except Exception as e:
         logger.critical(f"Critical failure in send_gmail_notification: {e}")
+        print(f"Critical Gmail failure: {e}", flush=True)  # Force stdout for Railway
         return False
 
 def main():
@@ -507,6 +525,7 @@ def main():
             try:
                 category = list(CATEGORIES.keys())[category_index % len(CATEGORIES)]
                 logger.info(f"Processing category: {category}")
+                print(f"Processing category: {category}", flush=True)  # Force stdout for Railway
                 
                 with ThreadPoolExecutor() as executor:
                     future = executor.submit(generate_ai_video, category, video_counts)
@@ -521,9 +540,11 @@ def main():
                 playlist_title = f"{final_category} - {subcategory}"
 
                 logger.info(f"Preparing to upload video: {title}")
+                print(f"Preparing to upload: {title}", flush=True)  # Force stdout for Railway
                 success, message = upload_to_youtube(YOUTUBE_PLAN_A, video_path, title, description, playlist_title)
                 if not success:
                     logger.warning("Plan A failed, switching to Plan B")
+                    print("Plan A failed, switching to Plan B", flush=True)  # Force stdout for Railway
                     success, message = upload_to_youtube(YOUTUBE_PLAN_B, video_path, title, description, playlist_title)
 
                 with lock:
@@ -535,24 +556,29 @@ def main():
                         save_video_counts(video_counts)
                     except Exception as e:
                         logger.error(f"Failed to update counts for {final_category}/{subcategory}: {e}")
+                        print(f"Error updating counts: {e}", flush=True)  # Force stdout for Railway
 
                 subject = "YouTube Upload " + ("Success" if success else "Failure")
                 body = f"Video '{title}' upload {'succeeded' if success else 'failed'}: {message}"
                 if not send_gmail_notification(GMAIL_CREDENTIALS, subject, body):
                     logger.error("Failed to send Gmail notification after retries.")
+                    print("Failed to send Gmail notification", flush=True)  # Force stdout for Railway
 
                 category_index += 1
                 if category_index >= len(CATEGORIES):
                     all_done = all(all(count >= 100 for count in cat_counts.values()) for cat_counts in video_counts.values() if isinstance(cat_counts, dict))
                     if all_done:
                         logger.info("All original categories completed, continuing with generated ones.")
+                        print("All original categories completed", flush=True)  # Force stdout for Railway
                     category_index = 0
 
             except (TimeoutError, ValueError) as e:
                 logger.error(f"Execution timeout or value error for {category}: {e}")
+                print(f"Timeout or value error: {e}", flush=True)  # Force stdout for Railway
                 send_gmail_notification(GMAIL_CREDENTIALS, "Execution Error", f"Timeout or value error for {category}: {e}")
             except Exception as e:
                 logger.error(f"Main execution failed for {category}: {e}")
+                print(f"Main execution failed: {e}", flush=True)  # Force stdout for Railway
                 send_gmail_notification(GMAIL_CREDENTIALS, "Critical Error", f"Script failed for {category}: {e}")
 
             finally:
@@ -561,16 +587,20 @@ def main():
                         if os.path.exists(file):
                             os.remove(file)
                             logger.debug(f"Cleaned up file: {file}")
+                            print(f"Cleaned up file: {file}", flush=True)  # Force stdout for Railway
                 except Exception as e:
                     logger.warning(f"Failed to clean up {file}: {e}")
+                    print(f"Failed to clean up {file}: {e}", flush=True)  # Force stdout for Railway
 
             time.sleep(0.1)  # Minimal delay for Overdrive
 
     except Exception as e:
         logger.critical(f"Critical failure in main loop: {e}")
+        print(f"Critical failure: {e}", flush=True)  # Force stdout for Railway
         send_gmail_notification(GMAIL_CREDENTIALS, "Critical Failure", f"Script crashed: {e}")
         deployment_logger.critical(f"Deployment failed: {e}")
 
 if __name__ == "__main__":
     deployment_logger.info("Deployment initialized successfully.")
+    print("Deployment initialized successfully", flush=True)  # Force stdout for Railway
     main()
