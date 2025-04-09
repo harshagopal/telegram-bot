@@ -1,6 +1,5 @@
 import requests
 import random
-import json
 import time
 import os
 from datetime import datetime
@@ -20,8 +19,12 @@ CATEGORIES = [
 ]
 
 HISTORY_FILE = "history.txt"
+CATEGORY_INDEX_FILE = "last_category.txt"
 
 # --- UTILITY FUNCTIONS ---
+
+def log(message):
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}")
 
 def load_history():
     if not os.path.exists(HISTORY_FILE):
@@ -34,23 +37,34 @@ def update_history(title):
         f.write(title + "\n")
 
 def get_next_category():
-    idx_file = "last_category.txt"
     last = 0
-    if os.path.exists(idx_file):
-        with open(idx_file, "r") as f:
-            last = int(f.read().strip())
+    if os.path.exists(CATEGORY_INDEX_FILE):
+        try:
+            last = int(open(CATEGORY_INDEX_FILE).read().strip())
+        except:
+            last = 0
     next_idx = (last + 1) % len(CATEGORIES)
-    with open(idx_file, "w") as f:
+    with open(CATEGORY_INDEX_FILE, "w") as f:
         f.write(str(next_idx))
     return CATEGORIES[next_idx]
 
+def retry_request(func, *args, max_attempts=3, **kwargs):
+    for attempt in range(max_attempts):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            log(f"Attempt {attempt + 1} failed: {str(e)}")
+            time.sleep(2)
+    raise Exception(f"All {max_attempts} attempts failed.")
+
+# --- AI CONTENT GENERATION ---
+
 def generate_ai_content(category):
-    # Use HuggingFace inference API or replicate for free GPT-J
     prompt = f"Generate a SEO-optimized, intriguing digital product title, description, and price in USD for category: {category}"
-    response = requests.post(
+    response = retry_request(requests.post,
         "https://api.deepai.org/api/text-generator",
         data={'text': prompt},
-        headers={'api-key': 'quickstart-QUdJIGlzIGNvbWluZy4uLi4K'}  # Free DeepAI key
+        headers={'api-key': 'quickstart-QUdJIGlzIGNvbWluZy4uLi4K'}
     )
     output = response.json().get("output", "")
     parts = output.split('\n')
@@ -58,6 +72,8 @@ def generate_ai_content(category):
     description = "\n".join(parts[1:3]).strip() if len(parts) > 2 else f"A premium {category.lower()} bundle to boost your productivity."
     price = round(random.uniform(5, 25), 2)
     return title, description, price
+
+# --- AI IMAGE GENERATION ---
 
 def generate_ai_thumbnail():
     prompt = random.choice([
@@ -67,12 +83,28 @@ def generate_ai_thumbnail():
         "Creative workspace, high resolution",
         "Elegant digital planner cover design"
     ])
-    response = requests.post(
-        "https://api.deepai.org/api/text2img",
-        data={'text': prompt},
-        headers={'api-key': 'quickstart-QUdJIGlzIGNvbWluZy4uLi4K'}
+    try:
+        response = retry_request(requests.post,
+            "https://api.deepai.org/api/text2img",
+            data={'text': prompt},
+            headers={'api-key': 'quickstart-QUdJIGlzIGNvbWluZy4uLi4K'}
+        )
+        return response.json().get("output_url")
+    except:
+        return generate_fallback_image()
+
+def generate_fallback_image():
+    # Fallback using Craiyon
+    response = retry_request(requests.post,
+        "https://backend.craiyon.com/generate",
+        json={"prompt": "A beautiful realistic human photo or nature landscape"}
     )
-    return response.json().get("output_url")
+    images = response.json().get("images", [])
+    if not images:
+        raise Exception("Craiyon fallback failed")
+    return "data:image/png;base64," + images[0]
+
+# --- GUMROAD UPLOAD ---
 
 def create_gumroad_product(title, description, price, thumbnail_url):
     url = "https://api.gumroad.com/v2/products"
@@ -80,54 +112,65 @@ def create_gumroad_product(title, description, price, thumbnail_url):
         "access_token": GUMROAD_ACCESS_TOKEN,
         "name": title,
         "description": description,
-        "price": int(price * 100),  # in cents
+        "price": int(price * 100),
         "published": True
     }
-    res = requests.post(url, data=payload)
+    res = retry_request(requests.post, url, data=payload)
     if res.status_code != 200 or "product" not in res.json():
         raise Exception(f"Gumroad creation failed: {res.text}")
     product_id = res.json()["product"]["id"]
 
     # Add thumbnail
-    img = requests.get(thumbnail_url).content
+    if thumbnail_url.startswith("data:image"):
+        from base64 import b64decode
+        img_data = b64decode(thumbnail_url.split(",")[1])
+    else:
+        img_data = requests.get(thumbnail_url).content
+
     with open("thumb.jpg", "wb") as f:
-        f.write(img)
+        f.write(img_data)
     with open("thumb.jpg", "rb") as img_file:
-        requests.put(f"https://api.gumroad.com/v2/products/{product_id}/edit",
+        retry_request(
+            requests.put,
+            f"https://api.gumroad.com/v2/products/{product_id}/edit",
             data={"access_token": GUMROAD_ACCESS_TOKEN},
             files={"preview": img_file}
         )
 
-    # Add a dummy file to satisfy Gumroad
+    # Dummy file
     with open("dummy.txt", "w") as f:
         f.write("This is your digital product.")
     with open("dummy.txt", "rb") as file:
-        requests.post(
+        retry_request(
+            requests.post,
             f"https://api.gumroad.com/v2/products/{product_id}/files",
             data={"access_token": GUMROAD_ACCESS_TOKEN},
             files={"file": file}
         )
 
-    product_url = f"https://gumroad.com/l/{product_id}"
-    return product_url
+    return f"https://gumroad.com/l/{product_id}"
+
+# --- TELEGRAM POSTING ---
 
 def send_telegram_message(title, price, url):
     inr_price = round(price * 83.2, 2)
     text = f"**{title}**\n\nPrice: ${price} (~₹{inr_price})\n\nLive Now: {url}"
-    requests.post(
+    retry_request(
+        requests.post,
         f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
         data={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
     )
 
-# --- MAIN AUTOPILOT FUNCTION ---
+# --- MAIN AUTOPILOT ---
 
 def autopilot():
+    log("Started autopilot run.")
     history = load_history()
     category = get_next_category()
     title, description, price = generate_ai_content(category)
 
     if title in history:
-        print(f"Duplicate title skipped: {title}")
+        log(f"Duplicate title found. Skipping: {title}")
         return
 
     try:
@@ -135,9 +178,9 @@ def autopilot():
         product_url = create_gumroad_product(title, description, price, thumbnail_url)
         send_telegram_message(title, price, product_url)
         update_history(title)
-        print(f"Uploaded: {title}")
+        log(f"SUCCESS: Uploaded - {title}")
     except Exception as e:
-        print(f"Error occurred: {str(e)}")
+        log(f"FAILURE: {str(e)}")
 
 if __name__ == "__main__":
     autopilot()
