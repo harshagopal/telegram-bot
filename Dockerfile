@@ -1,23 +1,23 @@
 FROM python:3.9-slim
 
-# Install FFmpeg and other system dependencies
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+# Install FFmpeg and other system dependencies, output to build logs
+RUN apt-get update && apt-get install -y ffmpeg && echo "FFmpeg installed successfully" || echo "FFmpeg installation failed" && rm -rf /var/lib/apt/lists/*
 
 # Update pip to the latest version
-RUN pip install --upgrade pip
+RUN pip install --upgrade pip && echo "Pip upgraded successfully" || echo "Pip upgrade failed"
 
 # Set working directory
 WORKDIR /app
 
 # Copy requirements.txt and install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && echo "Python dependencies installed successfully" || echo "Failed to install Python dependencies"
 
-# Copy all files and debug directory contents to stdout
+# Copy all files and debug directory contents to build logs
 COPY . .
-RUN echo "Files in /app after COPY:" && ls -la
+RUN echo "Files in /app after COPY:" && ls -la || echo "Failed to list files"
 
-# Check for uploader.py and set fallback script if not found
+# Check for uploader.py and set fallback script if not found, output to build logs
 RUN if [ ! -f uploader.py ]; then \
     echo "Warning: uploader.py not found, checking for alternatives" && \
     for file in *.py; do [ -f "$file" ] && export PYTHON_SCRIPT="$file" && break; done && \
