@@ -54,23 +54,31 @@ def retry_request(func, *args, max_attempts=3, **kwargs):
             return func(*args, **kwargs)
         except Exception as e:
             log(f"Attempt {attempt + 1} failed: {str(e)}")
-            time.sleep(2)
+            time.sleep(2 + attempt * 2)
     raise Exception(f"All {max_attempts} attempts failed.")
 
 # --- AI CONTENT GENERATION ---
 
 def generate_ai_content(category):
-    prompt = f"Generate a SEO-optimized, intriguing digital product title, description, and price in USD for category: {category}"
+    prompt = f"Generate a catchy digital product TITLE, DESCRIPTION, and PRICE in USD for the category: {category}. Keep it short and appealing."
+
     response = retry_request(requests.post,
         "https://api.deepai.org/api/text-generator",
         data={'text': prompt},
         headers={'api-key': 'quickstart-QUdJIGlzIGNvbWluZy4uLi4K'}
     )
     output = response.json().get("output", "")
+
     parts = output.split('\n')
-    title = parts[0][:100].strip() if len(parts) > 0 else f"{category} Pack {random.randint(100,999)}"
-    description = "\n".join(parts[1:3]).strip() if len(parts) > 2 else f"A premium {category.lower()} bundle to boost your productivity."
+    title = parts[0][:100].strip() if len(parts) > 0 and len(parts[0].strip()) >= 5 else f"{category} Bundle {random.randint(100, 999)}"
+    description = "\n".join([line.strip() for line in parts[1:3] if len(line.strip()) > 0])
+    if len(description) < 20:
+        description = f"A powerful {category.lower()} pack to boost your productivity instantly."
+
     price = round(random.uniform(5, 25), 2)
+
+    description += f"\n\n⚡ This {category} drop is available for a limited time. Act now!"
+
     return title, description, price
 
 # --- AI IMAGE GENERATION ---
@@ -94,7 +102,6 @@ def generate_ai_thumbnail():
         return generate_fallback_image()
 
 def generate_fallback_image():
-    # Fallback using Craiyon
     response = retry_request(requests.post,
         "https://backend.craiyon.com/generate",
         json={"prompt": "A beautiful realistic human photo or nature landscape"}
@@ -148,18 +155,27 @@ def create_gumroad_product(title, description, price, thumbnail_url):
             files={"file": file}
         )
 
-    return f"https://gumroad.com/l/{product_id}"
+    return f"https://gumroad.com/l/{product_id}", thumbnail_url
 
 # --- TELEGRAM POSTING ---
 
-def send_telegram_message(title, price, url):
+def send_telegram_message(title, price, url, thumbnail_url=None):
     inr_price = round(price * 83.2, 2)
-    text = f"**{title}**\n\nPrice: ${price} (~₹{inr_price})\n\nLive Now: {url}"
-    retry_request(
-        requests.post,
-        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-        data={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
-    )
+    caption = f"**{title}**\n\nPrice: ${price} (~₹{inr_price})\n\nLive Now: {url}\n\n🚀 Hurry — this drop won't last!"
+
+    if thumbnail_url and not thumbnail_url.startswith("data:image"):
+        retry_request(
+            requests.post,
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
+            data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"},
+            files={"photo": requests.get(thumbnail_url).content}
+        )
+    else:
+        retry_request(
+            requests.post,
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            data={"chat_id": TELEGRAM_CHAT_ID, "text": caption, "parse_mode": "Markdown"}
+        )
 
 # --- MAIN AUTOPILOT ---
 
@@ -175,8 +191,8 @@ def autopilot():
 
     try:
         thumbnail_url = generate_ai_thumbnail()
-        product_url = create_gumroad_product(title, description, price, thumbnail_url)
-        send_telegram_message(title, price, product_url)
+        product_url, img_url = create_gumroad_product(title, description, price, thumbnail_url)
+        send_telegram_message(title, price, product_url, img_url)
         update_history(title)
         log(f"SUCCESS: Uploaded - {title}")
     except Exception as e:
