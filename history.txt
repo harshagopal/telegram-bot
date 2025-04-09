@@ -1,0 +1,2 @@
+# Tracks previously generated product titles to prevent duplication.
+# Format: one product title per line
