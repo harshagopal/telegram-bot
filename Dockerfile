@@ -3,6 +3,9 @@ FROM python:3.9-slim
 # Install FFmpeg and other system dependencies
 RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
+# Update pip to the latest version
+RUN pip install --upgrade pip
+
 # Set working directory
 WORKDIR /app
 
@@ -10,9 +13,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all files and debug directory contents
+# Copy all files and debug directory contents to stdout
 COPY . .
-RUN echo "Files in /app after COPY:" > /app/build_log.txt && ls -la >> /app/build_log.txt
+RUN echo "Files in /app after COPY:" && ls -la
 
 # Check for uploader.py and set fallback script if not found
 RUN if [ ! -f uploader.py ]; then \
