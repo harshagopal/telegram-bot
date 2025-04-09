@@ -29,11 +29,9 @@ RUN if [ ! -f uploader.py ]; then \
 # Create a directory for logs with minimal permissions and ensure it’s writable
 RUN mkdir -p /app/logs && chmod 755 /app/logs
 
-# Command to run the script with logging to stdout and file, ensuring Railway captures logs
-CMD ["sh", "-c", "echo 'Starting script execution: $(date)' && \
-     if [ -n \"$PYTHON_SCRIPT\" ]; then python $PYTHON_SCRIPT; else python uploader.py; fi | tee -a /app/logs/runtime.log && \
-     echo 'Script execution completed: $(date)' && \
-     cat /app/logs/runtime.log /app/deployment.log /app/deployment_diagnostics.log >> /app/combined_logs.log 2>/dev/null || echo 'Failed to combine logs'"]
+# Command to run the script, streaming output to stdout
+CMD ["sh", "-c", "if [ -n \"$PYTHON_SCRIPT\" ]; then python $PYTHON_SCRIPT; else python uploader.py; fi"]
+# Note: Output is sent to stdout by default, which Railway captures
 
 # Optional: Health check (commented out, enable if needed)
 # HEALTHCHECK --interval=30s --timeout=3s \
