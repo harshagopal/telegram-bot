@@ -26,7 +26,7 @@ def safe_json(response):
         return response.json()
     except Exception:
         print(f"[safe_json] Failed to parse JSON. Response Text:\n{response.text[:300]}")
-        raise
+        return {}
 
 def load_history():
     return set(open(HISTORY_FILE).read().splitlines()) if os.path.exists(HISTORY_FILE) else set()
@@ -49,13 +49,14 @@ def retry_request(func, *args, max_attempts=3, **kwargs):
             response.raise_for_status()
             return response
         except Exception as e:
-            print(f"[Retry Attempt {attempt+1}] Error: {e}")
+            print(f"[Retry Attempt {attempt + 1}] Error: {e}")
             time.sleep(2 + attempt * 2)
-    raise Exception(f"All {max_attempts} attempts failed.")
+    raise Exception("All 3 attempts failed.")
 
 # --- AI CONTENT GENERATION ---
 def generate_ai_content(category):
     prompt = f"Generate a catchy TITLE, DESCRIPTION, and PRICE in USD for a digital product in: {category}"
+    print(f"[DeepAI Request] Using key: {DEEP_AI_API_KEY[:8]}...")
 
     try:
         response = retry_request(
@@ -72,6 +73,7 @@ def generate_ai_content(category):
     return parse_ai_response(output, category)
 
 def fallback_text_falcon(category):
+    print("[Fallback] Using HuggingFace Falcon model...")
     try:
         response = retry_request(
             requests.post,
@@ -83,7 +85,7 @@ def fallback_text_falcon(category):
         return parse_ai_response(output, category)
     except Exception as e:
         print("[HuggingFace Fallback] Failed with error:", e)
-        title = f"{category} Pack {random.randint(100,999)}"
+        title = f"{category} Pack {random.randint(100, 999)}"
         desc = f"A complete {category.lower()} solution to level up your productivity."
         return title, desc + "\n\n⚡ Grab this limited edition drop!", round(random.uniform(5, 25), 2)
 
@@ -107,6 +109,8 @@ def generate_ai_thumbnail():
         "Elegant minimalist planner cover design",
         "Digital art of vibrant organized workspace"
     ])
+    print("[Image Prompt] Using prompt:", prompt)
+
     try:
         response = retry_request(
             requests.post,
@@ -131,6 +135,7 @@ def generate_fallback_image():
         images = safe_json(response).get("images", [])
         if not images:
             raise Exception("Craiyon fallback failed")
+        print("[Craiyon] Image fallback success")
         return "data:image/png;base64," + images[0]
     except Exception as e:
         print("[Craiyon Fallback Failed] Error:", e)
@@ -148,7 +153,8 @@ def create_gumroad_product(title, description, price, thumbnail_url):
     }
 
     res = retry_request(requests.post, url, data=payload)
-    product_id = safe_json(res)["product"]["id"]
+    product_id = safe_json(res).get("product", {}).get("id")
+    print(f"[Gumroad] Product ID: {product_id}")
 
     if thumbnail_url.startswith("data:image"):
         img_data = b64decode(thumbnail_url.split(",")[1])
@@ -157,6 +163,7 @@ def create_gumroad_product(title, description, price, thumbnail_url):
 
     with open("thumb.jpg", "wb") as f:
         f.write(img_data)
+        print("[File] Saved thumb.jpg")
 
     with open("thumb.jpg", "rb") as img_file:
         retry_request(
