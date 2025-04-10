@@ -14,9 +14,12 @@ import numpy as np
 from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 import threading
-from google.oauth2 import service_account
-from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configure logging with detailed format for diagnostics
 logging.basicConfig(
@@ -34,30 +37,30 @@ deployment_logger = logging.getLogger('deployment')
 deployment_logger.setLevel(logging.INFO)
 deployment_logger.addHandler(logging.FileHandler('/app/logs/deployment.log'))
 
-# Hardcoded Credentials
+# Load Credentials from .env
 GMAIL_CREDENTIALS = {
-    "client_id": "350046852277-o4s9ofvbcs1ft1db1usq4f3g0monb0mo.apps.googleusercontent.com",
-    "client_secret": "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",
-    "refresh_token": "1//04h9aa0eGKWhtCgYIARAAGAQSNwF-L9IrY9lzFAd1-V_s7balK91KJOGv7Zc9GRODSyR2EDPb7FuADW3fDq7iZJMxmY4bQtigBuI",
-    "access_token": "ya29.a0AZYkNZhZH8b-UKMzhhfp0zI-9gi6JucrpIHbQSV5sBsHk-By9o-9puM6XOtT8li6YpQ-GHnIr2rqRRHupKjmLheGbNxl4_VvVLBYJe-JwRrU_3SW-Xogob4w0X-2b8Y2ZPgFtzBhu751wAc-IVevN_wpxL-UI_dThptMOZ8ZaCgYKAX4SARESFQHGX2Mi8FK8M8wXmiCX1cPtJt3A9Q0175"
+    "client_id": os.getenv("GMAIL_CLIENT_ID"),
+    "client_secret": os.getenv("GMAIL_CLIENT_SECRET"),
+    "refresh_token": os.getenv("GMAIL_REFRESH_TOKEN"),
+    "access_token": os.getenv("GMAIL_ACCESS_TOKEN")
 }
 
 YOUTUBE_PLAN_A = {
-    "client_id": "160820889531-n0esqor00kr79stf7trkdul7b67acabs.apps.googleusercontent.com",
-    "client_secret": "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",
-    "refresh_token": "1//04Ro32jYbn3SCCgYIARAAGAQSNwF-L9Ir7GzQ52vy3useymmO7uNMdCAu14Zk6cB3AYsE2k4njH4vrkp71xTB16jb4NY3DmCMlSQ",
-    "access_token": "ya29.a0AZYkNZjd8CJIFhpcA_3ASQmNgaTsIUvRE3l0PdqzOEa3bH7uPR9KKS3LPJhIgF-BMO1csv8fC_GiJjSU6gfxfdaKRLmeo3VA2P55rCMZzO9qxt0FJfJzGqofwplRYVRRS0Ex0_EhBL6nxXu6mR2ewwdfN5Mti-vQiOVaq77YaCgYKATMSARESFQHGX2MiJW9UvVKTCuLqSADHamyzJg0175"
+    "client_id": os.getenv("YOUTUBE_PLAN_A_CLIENT_ID"),
+    "client_secret": os.getenv("YOUTUBE_PLAN_A_CLIENT_SECRET"),
+    "refresh_token": os.getenv("YOUTUBE_PLAN_A_REFRESH_TOKEN"),
+    "access_token": os.getenv("YOUTUBE_PLAN_A_ACCESS_TOKEN")
 }
 
 YOUTUBE_PLAN_B = {
-    "client_id": "802931507603-9v48iiq95n6i46sjtv92t7gb095vm0mb.apps.googleusercontent.com",
-    "client_secret": "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",
-    "refresh_token": "1//0gCR50xfYuhpwCgYIARAAGBASNwF-L9IrSI_7QFRouzS9c69z32TDXDIvCOrBuMS_hafP05cnE-iTBaHHVJKKOY-z1uTlK8_NtxA",
-    "access_token": "ya29.a0AZYkNZjsQnIU6XU-ceDhBMGBmlbBJ7crzhenXOHFDxc1isciqVE3sa-Ap6t0bfwXjVRV9JXaE26fet4HTnmFSz2zhlB_d_G_pvRn5mFnAsZNcrgMpcApuyX46czkUmAOK-irDaHGAxSpSdpZrJLFBcvmy7LyOBTDJirXvUAnaCgYKAc0SARESFQHGX2MipnMetkuyNtkF-dbd75iIzg0175"
+    "client_id": os.getenv("YOUTUBE_PLAN_B_CLIENT_ID"),
+    "client_secret": os.getenv("YOUTUBE_PLAN_B_CLIENT_SECRET"),
+    "refresh_token": os.getenv("YOUTUBE_PLAN_B_REFRESH_TOKEN"),
+    "access_token": os.getenv("YOUTUBE_PLAN_B_ACCESS_TOKEN")
 }
 
-# ElevenLabs API Key
-ELEVENLABS_API_KEY = "sk_50a5f87e18e0150ab0cd71e703c0e08561deef6e7d0db668"
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+DEEP_AI_API_KEY = os.getenv("DEEP_AI_API_KEY")
 
 # Main Categories and Their Subcategories
 CATEGORIES = {
@@ -152,29 +155,25 @@ lock = threading.Lock()
 
 def refresh_token(credentials):
     try:
-        logger.info("Attempting to refresh Gmail token.")
+        logger.info("Attempting to refresh token.")
         creds = Credentials(
             token=credentials.get("access_token"),
             refresh_token=credentials.get("refresh_token"),
             token_uri="https://oauth2.googleapis.com/token",
             client_id=credentials["client_id"],
-            client_secret=credentials["client_secret"]
+            client_secret=credentials["client_secret"],
+            scopes=["https://www.googleapis.com/auth/gmail.send"]
         )
-
-        if creds.expired and creds.refresh_token:
-            logger.debug("Token expired, refreshing...")
-            creds.refresh(Request())
-            new_token = creds.token
-            credentials["access_token"] = new_token
-            logger.info("Token refreshed successfully using google-auth.")
-            return new_token
-        else:
-            logger.debug("Token is still valid or no refresh token available.")
-            return credentials["access_token"]
+        # Force refresh regardless of expiration status
+        logger.debug("Forcing token refresh...")
+        creds.refresh(Request())
+        new_token = creds.token
+        credentials["access_token"] = new_token
+        logger.info("Token refreshed successfully using google-auth.")
+        return new_token
     except Exception as e:
         logger.error(f"Failed to refresh token: {str(e)}")
         raise RuntimeError(f"Token refresh failed: {str(e)}")
-
 def get_playlist_id(youtube, playlist_title):
     try:
         logger.info(f"Checking playlist ID for {playlist_title}")
@@ -265,7 +264,7 @@ def generate_unique_script(category, subcategory, sub_subcategory, video_num):
             return f"{random.choice(intros)} {specifics[subcategory]}? {random.choice(actions)} {random.choice(endings)}"
     except Exception as e:
         logger.error(f"Failed to generate script for {category}/{subcategory}: {e}")
-        print(f"Error generating script: {e}", flush=True)  # Force stdout for Railway
+        print(f"Error generating script: {e}", flush=True)
         return f"Video {video_num}: Explore something new? discover this #{video_num} now!"
 
 def generate_dynamic_script(category, subcategory, sub_subcategory, video_num):
@@ -280,8 +279,9 @@ def generate_dynamic_script(category, subcategory, sub_subcategory, video_num):
         return f"{random.choice(intros)} {subcategory.lower()} in {category.lower()} with focus on {sub_subcategory.lower()}? {random.choice(actions)} #{video_num} now!"
     except Exception as e:
         logger.error(f"Failed to generate dynamic script for {category}/{subcategory}: {e}")
-        print(f"Error generating dynamic script: {e}", flush=True)  # Force stdout for Railway
+        print(f"Error generating dynamic script: {e}", flush=True)
         return f"Video {video_num}: Something new? discover this #{video_num} now!"
+
 def generate_ai_video(category, video_counts):
     try:
         logger.info(f"Starting video generation for category: {category}")
@@ -317,7 +317,13 @@ def generate_ai_video(category, video_counts):
         output_file = f"video_{category.replace(' ', '_')}_{subcategory.replace(' ', '_')}_{int(time.time())}.mp4"
         logger.info(f"Output file generated: {output_file}")
 
-        # Generate assets with high-quality, human-like elements
+        # Check disk space
+        statvfs = os.statvfs('/')
+        free_space = statvfs.f_frsize * statvfs.f_bavail / (1024 * 1024)  # Free space in MB
+        if free_space < 500:  # Require at least 500MB free
+            raise RuntimeError(f"Insufficient disk space: {free_space}MB available")
+
+        # Generate assets
         try:
             logger.debug("Fetching face image from ThisPersonDoesNotExist")
             face_response = requests.get("https://thispersondoesnotexist.com", timeout=5)
@@ -325,20 +331,26 @@ def generate_ai_video(category, video_counts):
             face_img = Image.open(io.BytesIO(face_response.content)).resize((1920, 2160), Image.LANCZOS)
         except Exception as e:
             logger.error(f"Failed to fetch face: {e}")
-            print(f"Error fetching face: {e}", flush=True)  # Force stdout for Railway
+            print(f"Error fetching face: {e}", flush=True)
             face_img = Image.new('RGB', (1920, 2160), color='gray')
 
+        # Use Deep AI for background image generation
         try:
-            logger.debug("Generating background image with Craiyon")
-            bg_response = requests.post("https://backend.craiyon.com/generate", json={"prompt": script}, timeout=15)
+            logger.debug("Generating background image with Deep AI")
+            bg_response = requests.post(
+                "https://api.deepai.org/api/text2img",
+                data={"text": script},
+                headers={"api-key": DEEP_AI_API_KEY},
+                timeout=30
+            )
             bg_response.raise_for_status()
-            bg_url = bg_response.json()["images"][0]
+            bg_url = bg_response.json()["output_url"]
             bg_data = requests.get(bg_url, timeout=15).content
             bg_img = Image.open(io.BytesIO(bg_data)).resize((1920, 2160), Image.LANCZOS)
         except Exception as e:
-            logger.error(f"Failed to generate background: {e}")
-            print(f"Error generating background: {e}", flush=True)  # Force stdout for Railway
-            bg_img = Image.new('RGB', (1920, 2160), color=(200, 200, 255))
+            logger.error(f"Failed to generate background with Deep AI: {e}")
+            print(f"Error generating background: {e}", flush=True)
+            bg_img = Image.new('RGB', (1920, 2160), color=(200, 200, 255))  # Fallback to light blue
 
         final_img = Image.new('RGB', (3840, 2160))
         final_img.paste(bg_img, (0, 0))
@@ -350,7 +362,7 @@ def generate_ai_video(category, video_counts):
             draw.text((20, 20), script[:50] + "...", fill='white', font=font)
         except Exception as e:
             logger.error(f"Failed to draw text on image: {e}")
-            print(f"Error drawing text: {e}", flush=True)  # Force stdout for Railway
+            print(f"Error drawing text: {e}", flush=True)
 
         img_byte_arr = io.BytesIO()
         try:
@@ -359,7 +371,7 @@ def generate_ai_video(category, video_counts):
             img_byte_arr = img_byte_arr.getvalue()
         except Exception as e:
             logger.error(f"Failed to save image: {e}")
-            print(f"Error saving image: {e}", flush=True)  # Force stdout for Railway
+            print(f"Error saving image: {e}", flush=True)
             img_byte_arr = io.BytesIO(Image.new('RGB', (3840, 2160), color='gray').tobytes())
 
         audio_file = f"audio_{category}_{subcategory}.mp3"
@@ -375,7 +387,7 @@ def generate_ai_video(category, video_counts):
                     f.write(voice_response.content)
             except Exception as e:
                 logger.error(f"ElevenLabs voice failed: {e}")
-                print(f"Error generating audio: {e}", flush=True)  # Force stdout for Railway
+                print(f"Error generating audio: {e}", flush=True)
                 tts = gTTS(text=script, lang='en-us', tld='us', slow=False)
                 tts.save(audio_file)
 
@@ -386,11 +398,11 @@ def generate_ai_video(category, video_counts):
             img_clip = ImageClip(np.array(Image.open(io.BytesIO(img_byte_arr))), duration=30)
             audio_clip = AudioFileClip(audio_file)
             final_clip = img_clip.set_audio(audio_clip)
-            final_clip.write_videofile(output_file, codec="libx264", fps=30, bitrate="50000k", logger=None, threads=4)
+            final_clip.write_videofile(output_file, codec="libx264", fps=24, bitrate="8000k", logger=None, threads=4)
             logger.info(f"Video successfully created: {output_file}")
         except Exception as e:
             logger.error(f"Video creation failed: {e}")
-            print(f"Error creating video: {e}", flush=True)  # Force stdout for Railway
+            print(f"Error creating video: {e}", flush=True)
             raise
 
         with lock:
@@ -403,12 +415,12 @@ def generate_ai_video(category, video_counts):
                 save_video_counts(video_counts)
             except Exception as e:
                 logger.error(f"Failed to update video counts: {e}")
-                print(f"Error updating video counts: {e}", flush=True)  # Force stdout for Railway
+                print(f"Error updating video counts: {e}", flush=True)
 
         return output_file, script, category, subcategory
     except Exception as e:
         logger.critical(f"Critical failure in generate_ai_video for {category}: {e}")
-        print(f"Critical failure in video generation: {e}", flush=True)  # Force stdout for Railway
+        print(f"Critical failure in video generation: {e}", flush=True)
         return None, f"Error Video {video_num}", category, subcategory
 
 def upload_to_youtube(credentials, video_path, title, description, playlist_title=None):
@@ -423,8 +435,7 @@ def upload_to_youtube(credentials, video_path, title, description, playlist_titl
             playlist_id = get_playlist_id(youtube, playlist_title)
             if not playlist_id:
                 logger.warning(f"Playlist '{playlist_title}' not found, uploading without playlist.")
-                print(f"Warning: Playlist {playlist_title} not found", flush=True)  # Force stdout for Railway
-                playlist_id = None
+                print(f"Warning: Playlist {playlist_title} not found", flush=True)
 
         for attempt in range(max_retries):
             try:
@@ -450,7 +461,7 @@ def upload_to_youtube(credentials, video_path, title, description, playlist_titl
                 )
                 response = request.execute(num_retries=5)
                 logger.info(f"Video uploaded successfully: {response['id']}")
-                print(f"Video uploaded: {response['id']}", flush=True)  # Force stdout for Railway
+                print(f"Video uploaded: {response['id']}", flush=True)
 
                 if playlist_id:
                     logger.debug(f"Adding video to playlist {playlist_title}")
@@ -468,23 +479,23 @@ def upload_to_youtube(credentials, video_path, title, description, playlist_titl
                         body=playlist_item_body
                     ).execute()
                     logger.info(f"Video added to playlist {playlist_title}: {playlist_request['id']}")
-                    print(f"Video added to playlist {playlist_title}", flush=True)  # Force stdout for Railway
+                    print(f"Video added to playlist {playlist_title}", flush=True)
 
                 return True, response
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 401:
                     logger.warning(f"401 error detected, refreshing token for attempt {attempt + 1}")
-                    print(f"401 error, refreshing token", flush=True)  # Force stdout for Railway
+                    print(f"401 error, refreshing token", flush=True)
                     refresh_token(credentials)
                     continue
                 logger.error(f"Upload attempt {attempt + 1} failed: {e}")
-                print(f"Upload failed: {e}", flush=True)  # Force stdout for Railway
+                print(f"Upload failed: {e}", flush=True)
                 if attempt == max_retries - 1:
                     return False, str(e)
                 time.sleep(0.5 * (2 ** attempt))
     except Exception as e:
         logger.critical(f"Critical failure in upload_to_youtube for {title}: {e}")
-        print(f"Critical upload failure: {e}", flush=True)  # Force stdout for Railway
+        print(f"Critical upload failure: {e}", flush=True)
         return False, str(e)
 
 def send_gmail_notification(credentials, subject, body):
@@ -499,23 +510,23 @@ def send_gmail_notification(credentials, subject, body):
                 response = requests.post(url, headers=headers, json=message, timeout=5)
                 response.raise_for_status()
                 logger.info("Gmail notification sent successfully.")
-                print(f"Gmail notification sent: {subject}", flush=True)  # Force stdout for Railway
+                print(f"Gmail notification sent: {subject}", flush=True)
                 return True
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 401:
                     logger.warning(f"401 error detected, refreshing token for Gmail attempt {attempt + 1}")
-                    print(f"401 error for Gmail, refreshing token", flush=True)  # Force stdout for Railway
+                    print(f"401 error for Gmail, refreshing token", flush=True)
                     refresh_token(credentials)
                     continue
                 logger.error(f"Gmail notification attempt {attempt + 1} failed: {e}")
-                print(f"Gmail notification failed: {e}", flush=True)  # Force stdout for Railway
+                print(f"Gmail notification failed: {e}", flush=True)
                 if attempt == max_retries - 1:
                     logger.error("Max retries reached for Gmail notification, skipping.")
                     return False
                 time.sleep(0.5 * (2 ** attempt))
     except Exception as e:
         logger.critical(f"Critical failure in send_gmail_notification: {e}")
-        print(f"Critical Gmail failure: {e}", flush=True)  # Force stdout for Railway
+        print(f"Critical Gmail failure: {e}", flush=True)
         return False
 
 def main():
@@ -526,14 +537,17 @@ def main():
         video_counts = load_video_counts()
 
         while True:
+            video_path = None  # Initialize outside try block
+            category = None  # Initialize to avoid unbound variable
+            subcategory = None
             try:
                 category = list(CATEGORIES.keys())[category_index % len(CATEGORIES)]
                 logger.info(f"Processing category: {category}")
-                print(f"Processing category: {category}", flush=True)  # Force stdout for Railway
+                print(f"Processing category: {category}", flush=True)
                 
                 with ThreadPoolExecutor() as executor:
                     future = executor.submit(generate_ai_video, category, video_counts)
-                    video_path, script, final_category, final_subcategory = future.result(timeout=300)  # 5-minute timeout
+                    video_path, script, final_category, final_subcategory = future.result(timeout=300)
                     if video_path is None:
                         raise ValueError("Video generation failed")
 
@@ -544,11 +558,11 @@ def main():
                 playlist_title = f"{final_category} - {subcategory}"
 
                 logger.info(f"Preparing to upload video: {title}")
-                print(f"Preparing to upload: {title}", flush=True)  # Force stdout for Railway
+                print(f"Preparing to upload: {title}", flush=True)
                 success, message = upload_to_youtube(YOUTUBE_PLAN_A, video_path, title, description, playlist_title)
                 if not success:
                     logger.warning("Plan A failed, switching to Plan B")
-                    print("Plan A failed, switching to Plan B", flush=True)  # Force stdout for Railway
+                    print("Plan A failed, switching to Plan B", flush=True)
                     success, message = upload_to_youtube(YOUTUBE_PLAN_B, video_path, title, description, playlist_title)
 
                 with lock:
@@ -560,73 +574,57 @@ def main():
                         save_video_counts(video_counts)
                     except Exception as e:
                         logger.error(f"Failed to update counts for {final_category}/{subcategory}: {e}")
-                        print(f"Error updating counts: {e}", flush=True)  # Force stdout for Railway
+                        print(f"Error updating counts: {e}", flush=True)
 
                 subject = "YouTube Upload " + ("Success" if success else "Failure")
                 body = f"Video '{title}' upload {'succeeded' if success else 'failed'}: {message}"
                 if not send_gmail_notification(GMAIL_CREDENTIALS, subject, body):
                     logger.error("Failed to send Gmail notification after retries.")
-                    print("Failed to send Gmail notification", flush=True)  # Force stdout for Railway
+                    print("Failed to send Gmail notification", flush=True)
 
                 category_index += 1
                 if category_index >= len(CATEGORIES):
                     all_done = all(all(count >= 100 for count in cat_counts.values()) for cat_counts in video_counts.values() if isinstance(cat_counts, dict))
                     if all_done:
                         logger.info("All original categories completed, continuing with generated ones.")
-                        print("All original categories completed", flush=True)  # Force stdout for Railway
+                        print("All original categories completed", flush=True)
                     category_index = 0
 
             except (TimeoutError, ValueError) as e:
                 logger.error(f"Execution timeout or value error for {category}: {e}")
-                print(f"Timeout or value error: {e}", flush=True)  # Force stdout for Railway
+                print(f"Timeout or value error: {e}", flush=True)
                 send_gmail_notification(GMAIL_CREDENTIALS, "Execution Error", f"Timeout or value error for {category}: {e}")
             except Exception as e:
                 logger.error(f"Main execution failed for {category}: {e}")
-                print(f"Main execution failed: {e}", flush=True)  # Force stdout for Railway
+                print(f"Main execution failed: {e}", flush=True)
                 send_gmail_notification(GMAIL_CREDENTIALS, "Critical Error", f"Script failed for {category}: {e}")
 
             finally:
-                try:
-                    for file in [video_path, f"audio_{category}_{subcategory}.mp3"]:
-                        if os.path.exists(file):
-                            os.remove(file)
-                            logger.debug(f"Cleaned up file: {file}")
-                            print(f"Cleaned up file: {file}", flush=True)  # Force stdout for Railway
-                except Exception as e:
-                    logger.warning(f"Failed to clean up {file}: {e}")
-                    print(f"Failed to clean up {file}: {e}", flush=True)  # Force stdout for Railway
+                if video_path or category:  # Only attempt cleanup if variables are set
+                    files_to_clean = []
+                    if video_path:
+                        files_to_clean.append(video_path)
+                    if category and subcategory:
+                        files_to_clean.append(f"audio_{category}_{subcategory}.mp3")
+                    for file_path in files_to_clean:
+                        if os.path.exists(file_path):
+                            try:
+                                os.remove(file_path)
+                                logger.debug(f"Cleaned up file: {file_path}")
+                                print(f"Cleaned up file: {file_path}", flush=True)
+                            except Exception as e:
+                                logger.warning(f"Failed to clean up {file_path}: {e}")
+                                print(f"Failed to clean up {file_path}: {e}", flush=True)
 
             time.sleep(0.1)  # Minimal delay for Overdrive
 
     except Exception as e:
         logger.critical(f"Critical failure in main loop: {e}")
-        print(f"Critical failure: {e}", flush=True)  # Force stdout for Railway
+        print(f"Critical failure: {e}", flush=True)
         send_gmail_notification(GMAIL_CREDENTIALS, "Critical Failure", f"Script crashed: {e}")
         deployment_logger.critical(f"Deployment failed: {e}")
 
 if __name__ == "__main__":
     deployment_logger.info("Deployment initialized successfully.")
-    print("Deployment initialized successfully", flush=True)  # Force stdout for Railway
+    print("Deployment initialized successfully", flush=True)
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
