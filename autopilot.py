@@ -26,7 +26,7 @@ def safe_json(response):
         return response.json()
     except Exception:
         print(f"[safe_json] Failed to parse JSON. Response Text:\n{response.text[:300]}")
-        return {}
+        raise
 
 def load_history():
     return set(open(HISTORY_FILE).read().splitlines()) if os.path.exists(HISTORY_FILE) else set()
@@ -49,14 +49,13 @@ def retry_request(func, *args, max_attempts=3, **kwargs):
             response.raise_for_status()
             return response
         except Exception as e:
-            print(f"[Retry Attempt {attempt + 1}] Error: {e}")
+            print(f"[Retry Attempt {attempt+1}] Error: {e}")
             time.sleep(2 + attempt * 2)
-    raise Exception("All 3 attempts failed.")
+    raise Exception(f"All {max_attempts} attempts failed.")
 
 # --- AI CONTENT GENERATION ---
 def generate_ai_content(category):
     prompt = f"Generate a catchy TITLE, DESCRIPTION, and PRICE in USD for a digital product in: {category}"
-    print(f"[DeepAI Request] Using key: {DEEP_AI_API_KEY[:8]}...")
 
     try:
         response = retry_request(
@@ -73,7 +72,6 @@ def generate_ai_content(category):
     return parse_ai_response(output, category)
 
 def fallback_text_falcon(category):
-    print("[Fallback] Using HuggingFace Falcon model...")
     try:
         response = retry_request(
             requests.post,
@@ -85,7 +83,7 @@ def fallback_text_falcon(category):
         return parse_ai_response(output, category)
     except Exception as e:
         print("[HuggingFace Fallback] Failed with error:", e)
-        title = f"{category} Pack {random.randint(100, 999)}"
+        title = f"{category} Pack {random.randint(100,999)}"
         desc = f"A complete {category.lower()} solution to level up your productivity."
         return title, desc + "\n\n⚡ Grab this limited edition drop!", round(random.uniform(5, 25), 2)
 
@@ -109,8 +107,6 @@ def generate_ai_thumbnail():
         "Elegant minimalist planner cover design",
         "Digital art of vibrant organized workspace"
     ])
-    print("[Image Prompt] Using prompt:", prompt)
-
     try:
         response = retry_request(
             requests.post,
@@ -135,7 +131,6 @@ def generate_fallback_image():
         images = safe_json(response).get("images", [])
         if not images:
             raise Exception("Craiyon fallback failed")
-        print("[Craiyon] Image fallback success")
         return "data:image/png;base64," + images[0]
     except Exception as e:
         print("[Craiyon Fallback Failed] Error:", e)
@@ -153,8 +148,7 @@ def create_gumroad_product(title, description, price, thumbnail_url):
     }
 
     res = retry_request(requests.post, url, data=payload)
-    product_id = safe_json(res).get("product", {}).get("id")
-    print(f"[Gumroad] Product ID: {product_id}")
+    product_id = safe_json(res)["product"]["id"]
 
     if thumbnail_url.startswith("data:image"):
         img_data = b64decode(thumbnail_url.split(",")[1])
@@ -163,7 +157,6 @@ def create_gumroad_product(title, description, price, thumbnail_url):
 
     with open("thumb.jpg", "wb") as f:
         f.write(img_data)
-        print("[File] Saved thumb.jpg")
 
     with open("thumb.jpg", "rb") as img_file:
         retry_request(
@@ -206,39 +199,35 @@ def send_telegram_message(title, price, url, thumbnail_url=None):
             requests.post,
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
             data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"},
-            files={"photo": image_content}
+            files={"photo": ("thumb.jpg", image_content)}
         )
-        print("[Telegram] Photo Message Sent")
     else:
         retry_request(
             requests.post,
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
             data={"chat_id": TELEGRAM_CHAT_ID, "text": caption, "parse_mode": "Markdown"}
         )
-        print("[Telegram] Text Message Sent")
 
-# --- MAIN AUTOPILOT FUNCTION ---
+# --- MAIN DRIVER ---
 def autopilot():
-    print(f"[{datetime.now()}] Started autopilot run.")
-    history = load_history()
+    print(f"[{datetime.now()}] Started autopilot run.\n")
+
     category = get_next_category()
     print("[Category] Selected:", category)
 
-    try:
-        title, description, price = generate_ai_content(category)
+    title, description, price = generate_ai_content(category)
 
-        if title in history:
-            print(f"[Duplicate] Title already used. Skipping: {title}")
-            return
+    if title in load_history():
+        print("[Skip] Already posted:", title)
+        return
 
-        thumbnail_url = generate_ai_thumbnail()
-        product_url, img_url = create_gumroad_product(title, description, price, thumbnail_url)
-        send_telegram_message(title, price, product_url, img_url)
-        update_history(title)
-        print(f"[SUCCESS] Uploaded: {title}")
-    except Exception as e:
-        print(f"[FINAL FAILURE] {str(e)}")
-        cleanup_temp_files()
+    image_url = generate_ai_thumbnail()
+    product_url, thumb = create_gumroad_product(title, description, price, image_url)
+    send_telegram_message(title, price, product_url, thumb)
 
+    update_history(title)
+    print("\n[Success] Product Created and Posted!")
+
+# --- RUN ---
 if __name__ == "__main__":
     autopilot()
