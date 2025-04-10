@@ -9,7 +9,6 @@ from base64 import b64decode
 GUMROAD_ACCESS_TOKEN = "2Ot9MDcaOCiQkPZF0vfjGaqIkQEl9NsKmm8Ouzgq29A"
 TELEGRAM_BOT_TOKEN = "7903820907:AAHEwfUQEZMrwkG-bU8kCFZ0fJOAUTDGUuA"
 TELEGRAM_CHAT_ID = "@aiappsselfcreation"
-DEEP_AI_API_KEY = "e574a317-d252-477f-9317-d00f71a87c54"
 HUGGINGFACE_API_KEY = "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"
 
 CATEGORIES = [
@@ -53,36 +52,21 @@ def retry_request(func, *args, max_attempts=3, **kwargs):
             time.sleep(2 + attempt * 2)
     raise Exception(f"All {max_attempts} attempts failed.")
 
-# --- AI CONTENT GENERATION ---
+# --- AI CONTENT GENERATION (HuggingFace only) ---
 def generate_ai_content(category):
-    prompt = f"Generate a catchy TITLE, DESCRIPTION, and PRICE in USD for a digital product in: {category}"
-
-    try:
-        response = retry_request(
-            requests.post,
-            "https://api.deepai.org/api/text-generator",
-            data={'text': prompt},
-            headers={'api-key': DEEP_AI_API_KEY}
-        )
-        output = safe_json(response).get("output", "")
-    except Exception as e:
-        print("[DeepAI Fallback] Failed with error:", e)
-        return fallback_text_falcon(category)
-
-    return parse_ai_response(output, category)
-
-def fallback_text_falcon(category):
+    prompt = f"Write a catchy TITLE, DESCRIPTION, and PRICE in USD for a digital product in: {category}"
     try:
         response = retry_request(
             requests.post,
             "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct",
             headers={"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"},
-            json={"inputs": f"Write a short, catchy product title, description, and price for: {category}"}
+            json={"inputs": prompt}
         )
         output = safe_json(response)[0]["generated_text"]
         return parse_ai_response(output, category)
     except Exception as e:
-        print("[HuggingFace Fallback] Failed with error:", e)
+        print("[HuggingFace Generation Failed] Error:", e)
+        # Fallback static
         title = f"{category} Pack {random.randint(100,999)}"
         desc = f"A complete {category.lower()} solution to level up your productivity."
         return title, desc + "\n\n⚡ Grab this limited edition drop!", round(random.uniform(5, 25), 2)
@@ -100,7 +84,7 @@ def parse_ai_response(output, category):
     print("[AI Output] Price (USD):", price)
     return title, description + "\n\n⚡ Grab this limited edition drop!", price
 
-# --- AI IMAGE GENERATION ---
+# --- AI IMAGE GENERATION (via HuggingFace) ---
 def generate_ai_thumbnail():
     prompt = random.choice([
         "Smiling human face professional photo",
@@ -110,34 +94,21 @@ def generate_ai_thumbnail():
     try:
         response = retry_request(
             requests.post,
-            "https://api.deepai.org/api/text2img",
-            data={'text': prompt},
-            headers={'api-key': DEEP_AI_API_KEY}
+            "https://api-inference.huggingface.co/models/CompVis/stable-diffusion-v1-4",
+            headers={"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"},
+            json={"inputs": prompt}
         )
-        image_url = safe_json(response).get("output_url")
-        print("[Image] DeepAI Output URL:", image_url)
-        return image_url
+        image_bytes = response.content
+        with open("thumb.jpg", "wb") as f:
+            f.write(image_bytes)
+        print("[Image] HuggingFace Stable Diffusion generated.")
+        return "thumb.jpg"
     except Exception as e:
-        print("[DeepAI Image Fallback] Error:", e)
-        return generate_fallback_image()
-
-def generate_fallback_image():
-    try:
-        response = retry_request(
-            requests.post,
-            "https://backend.craiyon.com/generate",
-            json={"prompt": "creative modern digital product display"}
-        )
-        images = safe_json(response).get("images", [])
-        if not images:
-            raise Exception("Craiyon fallback failed")
-        return "data:image/png;base64," + images[0]
-    except Exception as e:
-        print("[Craiyon Fallback Failed] Error:", e)
+        print("[HuggingFace Image Failed] Error:", e)
         raise
 
 # --- GUMROAD UPLOAD ---
-def create_gumroad_product(title, description, price, thumbnail_url):
+def create_gumroad_product(title, description, price, thumbnail_path):
     url = "https://api.gumroad.com/v2/products"
     payload = {
         "access_token": GUMROAD_ACCESS_TOKEN,
@@ -150,15 +121,7 @@ def create_gumroad_product(title, description, price, thumbnail_url):
     res = retry_request(requests.post, url, data=payload)
     product_id = safe_json(res)["product"]["id"]
 
-    if thumbnail_url.startswith("data:image"):
-        img_data = b64decode(thumbnail_url.split(",")[1])
-    else:
-        img_data = requests.get(thumbnail_url).content
-
-    with open("thumb.jpg", "wb") as f:
-        f.write(img_data)
-
-    with open("thumb.jpg", "rb") as img_file:
+    with open(thumbnail_path, "rb") as img_file:
         retry_request(
             requests.put,
             f"https://api.gumroad.com/v2/products/{product_id}/edit",
@@ -180,7 +143,7 @@ def create_gumroad_product(title, description, price, thumbnail_url):
     cleanup_temp_files()
     product_url = f"https://gumroad.com/l/{product_id}"
     print("[Gumroad] Product Created:", product_url)
-    return product_url, thumbnail_url
+    return product_url, thumbnail_path
 
 def cleanup_temp_files():
     for file in ["thumb.jpg", "dummy.txt"]:
@@ -189,18 +152,18 @@ def cleanup_temp_files():
             print(f"[Cleanup] Deleted {file}")
 
 # --- TELEGRAM POSTING ---
-def send_telegram_message(title, price, url, thumbnail_url=None):
+def send_telegram_message(title, price, url, thumbnail_path=None):
     inr_price = round(price * 83.2, 2)
     caption = f"**{title}**\n\nPrice: ${price} (~₹{inr_price})\n\nLive Now: {url}\n\n🚀 Hurry — this drop won't last!"
 
-    if thumbnail_url and not thumbnail_url.startswith("data:image"):
-        image_content = requests.get(thumbnail_url).content
-        retry_request(
-            requests.post,
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
-            data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"},
-            files={"photo": ("thumb.jpg", image_content)}
-        )
+    if thumbnail_path and os.path.exists(thumbnail_path):
+        with open(thumbnail_path, "rb") as img:
+            retry_request(
+                requests.post,
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"},
+                files={"photo": img}
+            )
     else:
         retry_request(
             requests.post,
@@ -221,9 +184,9 @@ def autopilot():
         print("[Skip] Already posted:", title)
         return
 
-    image_url = generate_ai_thumbnail()
-    product_url, thumb = create_gumroad_product(title, description, price, image_url)
-    send_telegram_message(title, price, product_url, thumb)
+    image_path = generate_ai_thumbnail()
+    product_url, thumb_path = create_gumroad_product(title, description, price, image_path)
+    send_telegram_message(title, price, product_url, thumb_path)
 
     update_history(title)
     print("\n[Success] Product Created and Posted!")
