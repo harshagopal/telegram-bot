@@ -1,15 +1,19 @@
-import openai
 import requests
 import random
 import time
 import os
 from datetime import datetime
+from base64 import b64decode
+from dotenv import load_dotenv
 
-# --- CONFIGURATION ---
-OPENAI_API_KEY = "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"
-GUMROAD_ACCESS_TOKEN = "2Ot9MDcaOCiQkPZF0vfjGaqIkQEl9NsKmm8Ouzgq29A"
-TELEGRAM_BOT_TOKEN = "7903820907:AAHEwfUQEZMrwkG-bU8kCFZ0fJOAUTDGUuA"
-TELEGRAM_CHAT_ID = "@aiappsselfcreation"
+# --- LOAD .env CONFIGURATION ---
+load_dotenv()
+
+GUMROAD_ACCESS_TOKEN = os.getenv("GUMROAD_ACCESS_TOKEN")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+DEEP_AI_API_KEY = os.getenv("DEEP_AI_API_KEY")
+HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
 
 CATEGORIES = [
     "Notion Templates", "Digital Planners", "Resume Packs",
@@ -19,14 +23,12 @@ CATEGORIES = [
 HISTORY_FILE = "history.txt"
 CATEGORY_INDEX_FILE = "last_category.txt"
 
-openai.api_key = OPENAI_API_KEY
-
-# --- UTILITIES ---
+# --- UTILITY FUNCTIONS ---
 def safe_json(response):
     try:
         return response.json()
     except Exception:
-        print(f"[safe_json] Failed to parse JSON:\n{response.text[:300]}")
+        print(f"[safe_json] Failed to parse JSON. Response Text:\n{response.text[:300]}")
         raise
 
 def load_history():
@@ -54,37 +56,54 @@ def retry_request(func, *args, max_attempts=3, **kwargs):
             time.sleep(2 + attempt * 2)
     raise Exception(f"All {max_attempts} attempts failed.")
 
-# --- AI CONTENT GENERATION (OpenAI) ---
+# --- AI CONTENT GENERATION ---
 def generate_ai_content(category):
-    prompt = f"Create a catchy TITLE, DESCRIPTION, and PRICE in USD for a digital product in: {category}"
+    prompt = f"Generate a catchy TITLE, DESCRIPTION, and PRICE in USD for a digital product in: {category}"
+
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.9,
-            max_tokens=200
+        response = retry_request(
+            requests.post,
+            "https://api.deepai.org/api/text-generator",
+            data={'text': prompt},
+            headers={'api-key': DEEP_AI_API_KEY}
         )
-        content = response['choices'][0]['message']['content']
-        return parse_ai_response(content, category)
+        output = safe_json(response).get("output", "")
     except Exception as e:
-        print("[OpenAI Text Generation Failed] Error:", e)
-        fallback_title = f"{category} Pack {random.randint(100,999)}"
-        fallback_desc = f"A complete {category.lower()} solution to level up your productivity."
-        return fallback_title, fallback_desc + "\n\n⚡ Grab this limited edition drop!", round(random.uniform(5, 25), 2)
+        print("[DeepAI Fallback] Failed with error:", e)
+        return fallback_text_falcon(category)
+
+    return parse_ai_response(output, category)
+
+def fallback_text_falcon(category):
+    try:
+        response = retry_request(
+            requests.post,
+            "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct",
+            headers={"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"},
+            json={"inputs": f"Write a short, catchy product title, description, and price for: {category}"}
+        )
+        output = safe_json(response)[0]["generated_text"]
+        return parse_ai_response(output, category)
+    except Exception as e:
+        print("[HuggingFace Fallback] Failed with error:", e)
+        title = f"{category} Pack {random.randint(100,999)}"
+        desc = f"A complete {category.lower()} solution to level up your productivity."
+        return title, desc + "\n\n⚡ Grab this limited edition drop!", round(random.uniform(5, 25), 2)
 
 def parse_ai_response(output, category):
-    lines = output.strip().split('\n')
-    title = lines[0].strip() if lines else f"{category} Pack {random.randint(100,999)}"
-    desc = "\n".join([line.strip() for line in lines[1:3] if line.strip()])
-    if len(desc) < 20:
-        desc = f"A power-packed {category.lower()} resource bundle for instant results."
+    parts = output.split('\n')
+    title = parts[0][:100].strip() if parts and len(parts[0]) >= 5 else f"{category} Pack {random.randint(100,999)}"
+    description = "\n".join([line.strip() for line in parts[1:3] if line.strip()])
+    if len(description) < 20:
+        description = f"A power-packed {category.lower()} resource bundle for instant results."
     price = round(random.uniform(5, 25), 2)
-    print("[AI Output] Title:", title)
-    print("[AI Output] Description:", desc)
-    print("[AI Output] Price (USD):", price)
-    return title, desc + "\n\n⚡ Grab this limited edition drop!", price
 
-# --- AI IMAGE GENERATION (DALL·E via OpenAI) ---
+    print("[AI Output] Title:", title)
+    print("[AI Output] Description:", description)
+    print("[AI Output] Price (USD):", price)
+    return title, description + "\n\n⚡ Grab this limited edition drop!", price
+
+# --- AI IMAGE GENERATION ---
 def generate_ai_thumbnail():
     prompt = random.choice([
         "Smiling human face professional photo",
@@ -92,23 +111,36 @@ def generate_ai_thumbnail():
         "Digital art of vibrant organized workspace"
     ])
     try:
-        response = openai.Image.create(
-            prompt=prompt,
-            n=1,
-            size="512x512"
+        response = retry_request(
+            requests.post,
+            "https://api.deepai.org/api/text2img",
+            data={'text': prompt},
+            headers={'api-key': DEEP_AI_API_KEY}
         )
-        image_url = response['data'][0]['url']
-        img_data = requests.get(image_url).content
-        with open("thumb.jpg", "wb") as f:
-            f.write(img_data)
-        print("[Image] OpenAI DALL·E generated.")
-        return "thumb.jpg"
+        image_url = safe_json(response).get("output_url")
+        print("[Image] DeepAI Output URL:", image_url)
+        return image_url
     except Exception as e:
-        print("[OpenAI Image Generation Failed] Error:", e)
+        print("[DeepAI Image Fallback] Error:", e)
+        return generate_fallback_image()
+
+def generate_fallback_image():
+    try:
+        response = retry_request(
+            requests.post,
+            "https://backend.craiyon.com/generate",
+            json={"prompt": "creative modern digital product display"}
+        )
+        images = safe_json(response).get("images", [])
+        if not images:
+            raise Exception("Craiyon fallback failed")
+        return "data:image/png;base64," + images[0]
+    except Exception as e:
+        print("[Craiyon Fallback Failed] Error:", e)
         raise
 
 # --- GUMROAD UPLOAD ---
-def create_gumroad_product(title, description, price, thumbnail_path):
+def create_gumroad_product(title, description, price, thumbnail_url):
     url = "https://api.gumroad.com/v2/products"
     payload = {
         "access_token": GUMROAD_ACCESS_TOKEN,
@@ -121,7 +153,15 @@ def create_gumroad_product(title, description, price, thumbnail_path):
     res = retry_request(requests.post, url, data=payload)
     product_id = safe_json(res)["product"]["id"]
 
-    with open(thumbnail_path, "rb") as img_file:
+    if thumbnail_url.startswith("data:image"):
+        img_data = b64decode(thumbnail_url.split(",")[1])
+    else:
+        img_data = requests.get(thumbnail_url).content
+
+    with open("thumb.jpg", "wb") as f:
+        f.write(img_data)
+
+    with open("thumb.jpg", "rb") as img_file:
         retry_request(
             requests.put,
             f"https://api.gumroad.com/v2/products/{product_id}/edit",
@@ -143,7 +183,7 @@ def create_gumroad_product(title, description, price, thumbnail_path):
     cleanup_temp_files()
     product_url = f"https://gumroad.com/l/{product_id}"
     print("[Gumroad] Product Created:", product_url)
-    return product_url, thumbnail_path
+    return product_url, thumbnail_url
 
 def cleanup_temp_files():
     for file in ["thumb.jpg", "dummy.txt"]:
@@ -152,18 +192,18 @@ def cleanup_temp_files():
             print(f"[Cleanup] Deleted {file}")
 
 # --- TELEGRAM POSTING ---
-def send_telegram_message(title, price, url, thumbnail_path=None):
+def send_telegram_message(title, price, url, thumbnail_url=None):
     inr_price = round(price * 83.2, 2)
     caption = f"**{title}**\n\nPrice: ${price} (~₹{inr_price})\n\nLive Now: {url}\n\n🚀 Hurry — this drop won't last!"
 
-    if thumbnail_path and os.path.exists(thumbnail_path):
-        with open(thumbnail_path, "rb") as img:
-            retry_request(
-                requests.post,
-                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"},
-                files={"photo": img}
-            )
+    if thumbnail_url and not thumbnail_url.startswith("data:image"):
+        image_content = requests.get(thumbnail_url).content
+        retry_request(
+            requests.post,
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
+            data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"},
+            files={"photo": ("thumb.jpg", image_content)}
+        )
     else:
         retry_request(
             requests.post,
@@ -184,9 +224,9 @@ def autopilot():
         print("[Skip] Already posted:", title)
         return
 
-    image_path = generate_ai_thumbnail()
-    product_url, thumb_path = create_gumroad_product(title, description, price, image_path)
-    send_telegram_message(title, price, product_url, thumb_path)
+    image_url = generate_ai_thumbnail()
+    product_url, thumb = create_gumroad_product(title, description, price, image_url)
+    send_telegram_message(title, price, product_url, thumb)
 
     update_history(title)
     print("\n[Success] Product Created and Posted!")
