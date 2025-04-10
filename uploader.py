@@ -14,6 +14,9 @@ import numpy as np
 from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 import threading
+from google.oauth2 import service_account
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 
 # Configure logging with detailed format for diagnostics
 logging.basicConfig(
@@ -33,10 +36,10 @@ deployment_logger.addHandler(logging.FileHandler('/app/logs/deployment.log'))
 
 # Hardcoded Credentials
 GMAIL_CREDENTIALS = {
-    "client_id": "350046852277-da896jddcm7jgoj0q0vrk0v9shjor7l9.apps.googleusercontent.com",
-    "client_secret": "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",
-    "refresh_token": "1//04YhiuDNDBo7hCgYIARAAGAQSNwF-L9IrFoIEFuLh3GNwFmtquTehRyqMYTbrJ4IMdbvyi2ftwDe2msc1pJajj31qqcGf-vkOMUw",
-    "access_token": "ya29.a0AZYkNZiDJRxO57M_X84FVSojtJ5UYoJGklg2f0emuv30dZw99z67RoOOL3uGguar_FiTLV0jI8nvbS8phCWAhVyy3i0EVBoAZ7FLqE-0gRwZNt1r4U-AlqzbLGkqeKph8LkoNIluqzHFa-Pr9HsAB9nW1U4DZoQzT5wXlZOpaCgYKAeQSARESFQHGX2MipFjyraPrmoyni6rRFwNn6w0175"
+    "client_id": "350046852277-o4s9ofvbcs1ft1db1usq4f3g0monb0mo.apps.googleusercontent.com",
+    "client_secret": "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",
+    "refresh_token": "1//04h9aa0eGKWhtCgYIARAAGAQSNwF-L9IrY9lzFAd1-V_s7balK91KJOGv7Zc9GRODSyR2EDPb7FuADW3fDq7iZJMxmY4bQtigBuI",
+    "access_token": "ya29.a0AZYkNZhZH8b-UKMzhhfp0zI-9gi6JucrpIHbQSV5sBsHk-By9o-9puM6XOtT8li6YpQ-GHnIr2rqRRHupKjmLheGbNxl4_VvVLBYJe-JwRrU_3SW-Xogob4w0X-2b8Y2ZPgFtzBhu751wAc-IVevN_wpxL-UI_dThptMOZ8ZaCgYKAX4SARESFQHGX2Mi8FK8M8wXmiCX1cPtJt3A9Q0175"
 }
 
 YOUTUBE_PLAN_A = {
@@ -148,29 +151,29 @@ category_index = 0
 lock = threading.Lock()
 
 def refresh_token(credentials):
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"Attempting token refresh, attempt {attempt + 1}/{max_retries}")
-            url = "https://oauth2.googleapis.com/token"
-            data = {
-                "client_id": credentials["client_id"],
-                "client_secret": credentials["client_secret"],
-                "refresh_token": credentials["refresh_token"],
-                "grant_type": "refresh_token"
-            }
-            response = requests.post(url, data=data, timeout=5)
-            response.raise_for_status()
-            new_token = response.json()["access_token"]
+    try:
+        logger.info("Attempting to refresh Gmail token.")
+        creds = Credentials(
+            token=credentials.get("access_token"),
+            refresh_token=credentials.get("refresh_token"),
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=credentials["client_id"],
+            client_secret=credentials["client_secret"]
+        )
+
+        if creds.expired and creds.refresh_token:
+            logger.debug("Token expired, refreshing...")
+            creds.refresh(Request())
+            new_token = creds.token
             credentials["access_token"] = new_token
-            logger.info("Token refreshed successfully.")
+            logger.info("Token refreshed successfully using google-auth.")
             return new_token
-        except (requests.exceptions.RequestException, KeyError) as e:
-            logger.error(f"Token refresh attempt {attempt + 1} failed: {e}")
-            if attempt == max_retries - 1:
-                logger.critical("Max retries reached for token refresh, proceeding with last known token.")
-                return credentials["access_token"]  # Fallback to last known token
-            time.sleep(0.5 * (2 ** attempt))
+        else:
+            logger.debug("Token is still valid or no refresh token available.")
+            return credentials["access_token"]
+    except Exception as e:
+        logger.error(f"Failed to refresh token: {str(e)}")
+        raise RuntimeError(f"Token refresh failed: {str(e)}")
 
 def get_playlist_id(youtube, playlist_title):
     try:
@@ -507,6 +510,7 @@ def send_gmail_notification(credentials, subject, body):
                 logger.error(f"Gmail notification attempt {attempt + 1} failed: {e}")
                 print(f"Gmail notification failed: {e}", flush=True)  # Force stdout for Railway
                 if attempt == max_retries - 1:
+                    logger.error("Max retries reached for Gmail notification, skipping.")
                     return False
                 time.sleep(0.5 * (2 ** attempt))
     except Exception as e:
@@ -604,3 +608,25 @@ if __name__ == "__main__":
     deployment_logger.info("Deployment initialized successfully.")
     print("Deployment initialized successfully", flush=True)  # Force stdout for Railway
     main()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
