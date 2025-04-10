@@ -6,7 +6,7 @@ from datetime import datetime
 from base64 import b64decode
 from dotenv import load_dotenv
 
-# --- LOAD .env CONFIGURATION ---
+# Load environment variables (also auto handled in Railway)
 load_dotenv()
 
 GUMROAD_ACCESS_TOKEN = os.getenv("GUMROAD_ACCESS_TOKEN")
@@ -22,12 +22,12 @@ CATEGORIES = [
 HISTORY_FILE = "history.txt"
 CATEGORY_INDEX_FILE = "last_category.txt"
 
-# --- UTILITY FUNCTIONS ---
 def safe_json(response):
     try:
         return response.json()
     except Exception:
-        print(f"[safe_json] Failed to parse JSON. Response Text:\n{response.text[:300]}")
+        print("[safe_json] Failed to parse JSON. Response Text:")
+        print(response.text)
         raise
 
 def load_history():
@@ -44,18 +44,22 @@ def get_next_category():
         f.write(str(next_idx))
     return CATEGORIES[next_idx]
 
-def retry_request(func, *args, max_attempts=3, **kwargs):
-    for attempt in range(max_attempts):
+def retry_request(func, *args, max_attempts=3, backoff_factor=2, **kwargs):
+    delay = 1
+    for attempt in range(1, max_attempts + 1):
         try:
             response = func(*args, **kwargs)
             response.raise_for_status()
             return response
+        except requests.exceptions.HTTPError as e:
+            print(f"[Retry {attempt}] HTTPError: {e} - Response: {getattr(e.response, 'text', '')[:200]}")
         except Exception as e:
-            print(f"[Retry Attempt {attempt+1}] Error: {e}")
-            time.sleep(2 + attempt * 2)
+            print(f"[Retry {attempt}] Error: {e}")
+        time.sleep(delay)
+        delay *= backoff_factor
     raise Exception(f"All {max_attempts} attempts failed.")
 
-# --- AI CONTENT GENERATION USING OPENAI ---
+# --- AI CONTENT GENERATION ---
 def generate_ai_content(category):
     prompt = f"""
 Generate a catchy TITLE, DESCRIPTION, and PRICE in USD for a digital product in this category: {category}.
@@ -81,7 +85,7 @@ Price: ...
         content = safe_json(response)["choices"][0]["message"]["content"]
         return parse_openai_response(content, category)
     except Exception as e:
-        print("[OpenAI Error] Falling back with error:", e)
+        print("[OpenAI Error] Fallback:", e)
         return fallback_static(category)
 
 def parse_openai_response(content, category):
@@ -92,7 +96,7 @@ def parse_openai_response(content, category):
         price = next((float(line.split(":", 1)[1].strip().replace("$", "")) for line in lines if line.lower().startswith("price:")), round(random.uniform(5, 25), 2))
         return title, description + "\n\n⚡ Grab this limited edition drop!", round(price, 2)
     except Exception as e:
-        print("[Parse Error] Fallback triggered:", e)
+        print("[Parse Error] Fallback:", e)
         return fallback_static(category)
 
 def fallback_static(category):
@@ -100,7 +104,7 @@ def fallback_static(category):
     desc = f"A complete {category.lower()} solution to level up your productivity."
     return title, desc + "\n\n⚡ Grab this limited edition drop!", round(random.uniform(5, 25), 2)
 
-# --- AI IMAGE GENERATION ---
+# --- IMAGE GENERATION ---
 def generate_ai_thumbnail():
     prompt = random.choice([
         "Smiling human face professional photo",
@@ -119,10 +123,10 @@ def generate_ai_thumbnail():
         )
         return safe_json(response)["data"][0]["url"]
     except Exception as e:
-        print("[Image Generation Fallback] Error:", e)
+        print("[Image Generation Fallback]", e)
         return "https://via.placeholder.com/1024x1024.png?text=Digital+Product"
 
-# --- GUMROAD UPLOAD ---
+# --- GUMROAD PRODUCT CREATION ---
 def create_gumroad_product(title, description, price, thumbnail_url):
     url = "https://api.gumroad.com/v2/products"
     payload = {
@@ -134,12 +138,17 @@ def create_gumroad_product(title, description, price, thumbnail_url):
     }
 
     res = retry_request(requests.post, url, data=payload)
-    product_id = safe_json(res)["product"]["id"]
+    product = safe_json(res).get("product", {})
+    product_id = product.get("id")
 
-    if thumbnail_url.startswith("data:image"):
-        img_data = b64decode(thumbnail_url.split(",")[1])
-    else:
-        img_data = requests.get(thumbnail_url).content
+    if not product_id:
+        raise Exception("[Gumroad] Product creation failed: No product ID")
+
+    img_data = (
+        b64decode(thumbnail_url.split(",")[1])
+        if thumbnail_url.startswith("data:image") else
+        requests.get(thumbnail_url).content
+    )
 
     with open("thumb.jpg", "wb") as f:
         f.write(img_data)
@@ -174,7 +183,7 @@ def cleanup_temp_files():
             os.remove(file)
             print(f"[Cleanup] Deleted {file}")
 
-# --- TELEGRAM POSTING ---
+# --- TELEGRAM ---
 def send_telegram_message(title, price, url, thumbnail_url=None):
     inr_price = round(price * 83.2, 2)
     caption = f"**{title}**\n\nPrice: ${price} (~₹{inr_price})\n\nLive Now: {url}\n\n🚀 Hurry — this drop won't last!"
@@ -194,7 +203,7 @@ def send_telegram_message(title, price, url, thumbnail_url=None):
             data={"chat_id": TELEGRAM_CHAT_ID, "text": caption, "parse_mode": "Markdown"}
         )
 
-# --- MAIN DRIVER ---
+# --- MAIN ---
 def autopilot():
     print(f"[{datetime.now()}] Started autopilot run.\n")
 
@@ -214,6 +223,5 @@ def autopilot():
     update_history(title)
     print("\n[Success] Product Created and Posted!")
 
-# --- RUN ---
 if __name__ == "__main__":
     autopilot()
