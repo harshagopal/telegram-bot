@@ -12,8 +12,7 @@ load_dotenv()
 GUMROAD_ACCESS_TOKEN = os.getenv("GUMROAD_ACCESS_TOKEN")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-DEEP_AI_API_KEY = os.getenv("DEEP_AI_API_KEY")
-HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 CATEGORIES = [
     "Notion Templates", "Digital Planners", "Resume Packs",
@@ -56,52 +55,50 @@ def retry_request(func, *args, max_attempts=3, **kwargs):
             time.sleep(2 + attempt * 2)
     raise Exception(f"All {max_attempts} attempts failed.")
 
-# --- AI CONTENT GENERATION ---
+# --- AI CONTENT GENERATION USING OPENAI ---
 def generate_ai_content(category):
-    prompt = f"Generate a catchy TITLE, DESCRIPTION, and PRICE in USD for a digital product in: {category}"
-
+    prompt = f"""
+Generate a catchy TITLE, DESCRIPTION, and PRICE in USD for a digital product in this category: {category}.
+Format the response like:
+Title: ...
+Description: ...
+Price: ...
+"""
     try:
         response = retry_request(
             requests.post,
-            "https://api.deepai.org/api/text-generator",
-            data={'text': prompt},
-            headers={'api-key': DEEP_AI_API_KEY}
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-3.5-turbo",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7
+            }
         )
-        output = safe_json(response).get("output", "")
+        content = safe_json(response)["choices"][0]["message"]["content"]
+        return parse_openai_response(content, category)
     except Exception as e:
-        print("[DeepAI Fallback] Failed with error:", e)
-        return fallback_text_falcon(category)
+        print("[OpenAI Error] Falling back with error:", e)
+        return fallback_static(category)
 
-    return parse_ai_response(output, category)
-
-def fallback_text_falcon(category):
+def parse_openai_response(content, category):
     try:
-        response = retry_request(
-            requests.post,
-            "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct",
-            headers={"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"},
-            json={"inputs": f"Write a short, catchy product title, description, and price for: {category}"}
-        )
-        output = safe_json(response)[0]["generated_text"]
-        return parse_ai_response(output, category)
+        lines = content.strip().split('\n')
+        title = next((line.split(":", 1)[1].strip() for line in lines if line.lower().startswith("title:")), f"{category} Pack {random.randint(100,999)}")
+        description = next((line.split(":", 1)[1].strip() for line in lines if line.lower().startswith("description:")), f"An ultimate {category.lower()} toolkit.")
+        price = next((float(line.split(":", 1)[1].strip().replace("$", "")) for line in lines if line.lower().startswith("price:")), round(random.uniform(5, 25), 2))
+        return title, description + "\n\n⚡ Grab this limited edition drop!", round(price, 2)
     except Exception as e:
-        print("[HuggingFace Fallback] Failed with error:", e)
-        title = f"{category} Pack {random.randint(100,999)}"
-        desc = f"A complete {category.lower()} solution to level up your productivity."
-        return title, desc + "\n\n⚡ Grab this limited edition drop!", round(random.uniform(5, 25), 2)
+        print("[Parse Error] Fallback triggered:", e)
+        return fallback_static(category)
 
-def parse_ai_response(output, category):
-    parts = output.split('\n')
-    title = parts[0][:100].strip() if parts and len(parts[0]) >= 5 else f"{category} Pack {random.randint(100,999)}"
-    description = "\n".join([line.strip() for line in parts[1:3] if line.strip()])
-    if len(description) < 20:
-        description = f"A power-packed {category.lower()} resource bundle for instant results."
-    price = round(random.uniform(5, 25), 2)
-
-    print("[AI Output] Title:", title)
-    print("[AI Output] Description:", description)
-    print("[AI Output] Price (USD):", price)
-    return title, description + "\n\n⚡ Grab this limited edition drop!", price
+def fallback_static(category):
+    title = f"{category} Pack {random.randint(100,999)}"
+    desc = f"A complete {category.lower()} solution to level up your productivity."
+    return title, desc + "\n\n⚡ Grab this limited edition drop!", round(random.uniform(5, 25), 2)
 
 # --- AI IMAGE GENERATION ---
 def generate_ai_thumbnail():
@@ -113,31 +110,17 @@ def generate_ai_thumbnail():
     try:
         response = retry_request(
             requests.post,
-            "https://api.deepai.org/api/text2img",
-            data={'text': prompt},
-            headers={'api-key': DEEP_AI_API_KEY}
+            "https://api.openai.com/v1/images/generations",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={"model": "dall-e-3", "prompt": prompt, "n": 1, "size": "1024x1024"}
         )
-        image_url = safe_json(response).get("output_url")
-        print("[Image] DeepAI Output URL:", image_url)
-        return image_url
+        return safe_json(response)["data"][0]["url"]
     except Exception as e:
-        print("[DeepAI Image Fallback] Error:", e)
-        return generate_fallback_image()
-
-def generate_fallback_image():
-    try:
-        response = retry_request(
-            requests.post,
-            "https://backend.craiyon.com/generate",
-            json={"prompt": "creative modern digital product display"}
-        )
-        images = safe_json(response).get("images", [])
-        if not images:
-            raise Exception("Craiyon fallback failed")
-        return "data:image/png;base64," + images[0]
-    except Exception as e:
-        print("[Craiyon Fallback Failed] Error:", e)
-        raise
+        print("[Image Generation Fallback] Error:", e)
+        return "https://via.placeholder.com/1024x1024.png?text=Digital+Product"
 
 # --- GUMROAD UPLOAD ---
 def create_gumroad_product(title, description, price, thumbnail_url):
