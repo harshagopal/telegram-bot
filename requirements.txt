@@ -1,8 +1,9 @@
-requests==2.31.0  # Ensure this matches the version you're using, or use the latest stable version
-google-api-python-client==2.120.0  # For googleapiclient
-gtts==2.5.1  # For text-to-speech
-Pillow==10.2.0  # For image processing with PIL
-moviepy==1.0.3  # For video editing
-numpy==1.26.4  # For numerical operations
-google-auth==2.29.0  # For OAuth2 token handling
-google-auth-oauthlib==1.2.0  # For OAuth2 library support
+requests==2.31.0
+google-api-python-client==2.120.0
+gtts==2.5.1
+Pillow==10.2.0
+moviepy==1.0.3
+numpy==1.26.4
+google-auth==2.29.0
+google-auth-oauthlib==1.2.0
+python-dotenv==1.0.1
