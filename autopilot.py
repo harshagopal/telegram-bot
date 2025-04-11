@@ -6,7 +6,7 @@ from datetime import datetime
 from base64 import b64decode
 from dotenv import load_dotenv
 
-# Load environment variables (also auto handled in Railway)
+# Load environment variables (auto handled in Railway too)
 load_dotenv()
 
 GUMROAD_ACCESS_TOKEN = os.getenv("GUMROAD_ACCESS_TOKEN")
@@ -19,8 +19,17 @@ CATEGORIES = [
     "AI Prompt Collections", "Study Guides / Cheat Sheets"
 ]
 
+PLACEHOLDER_IMAGES = [
+    "https://source.unsplash.com/1024x1024/?workspace",
+    "https://source.unsplash.com/1024x1024/?productivity",
+    "https://source.unsplash.com/1024x1024/?digital",
+    "https://source.unsplash.com/1024x1024/?technology",
+    "https://source.unsplash.com/1024x1024/?planning"
+]
+
 HISTORY_FILE = "history.txt"
 CATEGORY_INDEX_FILE = "last_category.txt"
+IMAGE_INDEX_FILE = "last_image.txt"
 
 def safe_json(response):
     try:
@@ -44,7 +53,14 @@ def get_next_category():
         f.write(str(next_idx))
     return CATEGORIES[next_idx]
 
-def retry_request(func, *args, max_attempts=3, backoff_factor=2, **kwargs):
+def get_next_placeholder_image():
+    last = int(open(IMAGE_INDEX_FILE).read().strip()) if os.path.exists(IMAGE_INDEX_FILE) else 0
+    next_idx = (last + 1) % len(PLACEHOLDER_IMAGES)
+    with open(IMAGE_INDEX_FILE, "w") as f:
+        f.write(str(next_idx))
+    return PLACEHOLDER_IMAGES[next_idx]
+
+def retry_request(func, *args, max_attempts=2, backoff_factor=2, **kwargs):
     delay = 1
     for attempt in range(1, max_attempts + 1):
         try:
@@ -55,8 +71,9 @@ def retry_request(func, *args, max_attempts=3, backoff_factor=2, **kwargs):
             print(f"[Retry {attempt}] HTTPError: {e} - Response: {getattr(e.response, 'text', '')[:200]}")
         except Exception as e:
             print(f"[Retry {attempt}] Error: {e}")
-        time.sleep(delay)
-        delay *= backoff_factor
+        if attempt < max_attempts:
+            time.sleep(delay)
+            delay *= backoff_factor
     raise Exception(f"All {max_attempts} attempts failed.")
 
 # --- AI CONTENT GENERATION ---
@@ -124,7 +141,7 @@ def generate_ai_thumbnail():
         return safe_json(response)["data"][0]["url"]
     except Exception as e:
         print("[Image Generation Fallback]", e)
-        return "https://via.placeholder.com/1024x1024.png?text=Digital+Product"
+        return get_next_placeholder_image()
 
 # --- GUMROAD PRODUCT CREATION ---
 def create_gumroad_product(title, description, price, thumbnail_url):
