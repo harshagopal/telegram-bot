@@ -38,13 +38,6 @@ deployment_logger.setLevel(logging.INFO)
 deployment_logger.addHandler(logging.FileHandler('/app/logs/deployment.log'))
 
 # Load Credentials from .env
-GMAIL_CREDENTIALS = {
-    "client_id": os.getenv("GMAIL_CLIENT_ID"),
-    "client_secret": os.getenv("GMAIL_CLIENT_SECRET"),
-    "refresh_token": os.getenv("GMAIL_REFRESH_TOKEN"),
-    "access_token": os.getenv("GMAIL_ACCESS_TOKEN")
-}
-
 YOUTUBE_PLAN_A = {
     "client_id": os.getenv("YOUTUBE_PLAN_A_CLIENT_ID"),
     "client_secret": os.getenv("YOUTUBE_PLAN_A_CLIENT_SECRET"),
@@ -61,6 +54,8 @@ YOUTUBE_PLAN_B = {
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 DEEP_AI_API_KEY = os.getenv("DEEP_AI_API_KEY")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Main Categories and Their Subcategories
 CATEGORIES = {
@@ -162,7 +157,7 @@ def refresh_token(credentials):
             token_uri="https://oauth2.googleapis.com/token",
             client_id=credentials["client_id"],
             client_secret=credentials["client_secret"],
-            scopes=["https://www.googleapis.com/auth/gmail.send"]
+            scopes=["https://www.googleapis.com/auth/youtube.upload"]
         )
         # Force refresh regardless of expiration status
         logger.debug("Forcing token refresh...")
@@ -174,6 +169,7 @@ def refresh_token(credentials):
     except Exception as e:
         logger.error(f"Failed to refresh token: {str(e)}")
         raise RuntimeError(f"Token refresh failed: {str(e)}")
+
 def get_playlist_id(youtube, playlist_title):
     try:
         logger.info(f"Checking playlist ID for {playlist_title}")
@@ -283,145 +279,152 @@ def generate_dynamic_script(category, subcategory, sub_subcategory, video_num):
         return f"Video {video_num}: Something new? discover this #{video_num} now!"
 
 def generate_ai_video(category, video_counts):
-    try:
-        logger.info(f"Starting video generation for category: {category}")
-        with lock:
-            subcategory = random.choice(list(CATEGORIES[category]))
-            if category == "Branding & Growth Strategies" and subcategory == "Storytelling & Facts":
-                sub_subcategory = random.choice(list(STORYTELLING_SUBTOPICS.keys()))
-                detail = random.choice(STORYTELLING_SUBTOPICS[sub_subcategory])
-                video_num = video_counts[category][subcategory][sub_subcategory] + 1
-                logger.debug(f"Video number for {category}/{subcategory}/{sub_subcategory}: {video_num}")
-                if video_num >= 100:
-                    new_cat = generate_new_category(list(CATEGORIES.keys()) + list(video_counts["Generated Categories"].keys()))
-                    if new_cat not in video_counts["Generated Categories"]:
-                        video_counts["Generated Categories"][new_cat] = {sub: 0 for sub in generate_new_subcategories(new_cat)}
-                    category, subcategory, sub_subcategory = new_cat, random.choice(list(video_counts["Generated Categories"][new_cat].keys())), 0
-                    script = generate_dynamic_script(category, subcategory, "new topic", video_num)
-                    logger.info(f"Switched to new category: {new_cat}")
-                else:
-                    script = generate_unique_script(category, subcategory, detail, video_num)
-            else:
-                video_num = video_counts[category][subcategory] + 1
-                logger.debug(f"Video number for {category}/{subcategory}: {video_num}")
-                if video_num >= 100:
-                    new_cat = generate_new_category(list(CATEGORIES.keys()) + list(video_counts["Generated Categories"].keys()))
-                    if new_cat not in video_counts["Generated Categories"]:
-                        video_counts["Generated Categories"][new_cat] = {sub: 0 for sub in generate_new_subcategories(new_cat)}
-                    category, subcategory = new_cat, random.choice(list(video_counts["Generated Categories"][new_cat].keys()))
-                    script = generate_dynamic_script(category, subcategory, "new topic", video_num)
-                    logger.info(f"Switched to new category: {new_cat}")
-                else:
-                    script = generate_unique_script(category, subcategory, "general", video_num)
+    attempts = 0
+    max_attempts = 2  # 1 initial + 1 retry
 
-        output_file = f"video_{category.replace(' ', '_')}_{subcategory.replace(' ', '_')}_{int(time.time())}.mp4"
-        logger.info(f"Output file generated: {output_file}")
-
-        # Check disk space
-        statvfs = os.statvfs('/')
-        free_space = statvfs.f_frsize * statvfs.f_bavail / (1024 * 1024)  # Free space in MB
-        if free_space < 500:  # Require at least 500MB free
-            raise RuntimeError(f"Insufficient disk space: {free_space}MB available")
-
-        # Generate assets
+    while attempts < max_attempts:
         try:
-            logger.debug("Fetching face image from ThisPersonDoesNotExist")
-            face_response = requests.get("https://thispersondoesnotexist.com", timeout=5)
-            face_response.raise_for_status()
-            face_img = Image.open(io.BytesIO(face_response.content)).resize((1920, 2160), Image.LANCZOS)
-        except Exception as e:
-            logger.error(f"Failed to fetch face: {e}")
-            print(f"Error fetching face: {e}", flush=True)
-            face_img = Image.new('RGB', (1920, 2160), color='gray')
-
-        # Use Deep AI for background image generation
-        try:
-            logger.debug("Generating background image with Deep AI")
-            bg_response = requests.post(
-                "https://api.deepai.org/api/text2img",
-                data={"text": script},
-                headers={"api-key": DEEP_AI_API_KEY},
-                timeout=30
-            )
-            bg_response.raise_for_status()
-            bg_url = bg_response.json()["output_url"]
-            bg_data = requests.get(bg_url, timeout=15).content
-            bg_img = Image.open(io.BytesIO(bg_data)).resize((1920, 2160), Image.LANCZOS)
-        except Exception as e:
-            logger.error(f"Failed to generate background with Deep AI: {e}")
-            print(f"Error generating background: {e}", flush=True)
-            bg_img = Image.new('RGB', (1920, 2160), color=(200, 200, 255))  # Fallback to light blue
-
-        final_img = Image.new('RGB', (3840, 2160))
-        final_img.paste(bg_img, (0, 0))
-        final_img.paste(face_img, (1920, 0))
-        try:
-            logger.debug("Drawing text on final image")
-            draw = ImageDraw.Draw(final_img)
-            font = ImageFont.truetype("arial.ttf", 40) if os.path.exists("arial.ttf") else ImageFont.load_default()
-            draw.text((20, 20), script[:50] + "...", fill='white', font=font)
-        except Exception as e:
-            logger.error(f"Failed to draw text on image: {e}")
-            print(f"Error drawing text: {e}", flush=True)
-
-        img_byte_arr = io.BytesIO()
-        try:
-            logger.debug("Saving final image to byte array")
-            final_img.save(img_byte_arr, format='PNG')
-            img_byte_arr = img_byte_arr.getvalue()
-        except Exception as e:
-            logger.error(f"Failed to save image: {e}")
-            print(f"Error saving image: {e}", flush=True)
-            img_byte_arr = io.BytesIO(Image.new('RGB', (3840, 2160), color='gray').tobytes())
-
-        audio_file = f"audio_{category}_{subcategory}.mp3"
-
-        def generate_audio():
-            try:
-                logger.debug(f"Generating audio for {category}/{subcategory}")
-                headers = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"}
-                voice_data = {"text": script, "voice_id": "21m00Tcm4TlvDq8ikWAM"}  # Rachel voice
-                voice_response = requests.post("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", headers=headers, json=voice_data, timeout=15)
-                voice_response.raise_for_status()
-                with open(audio_file, "wb") as f:
-                    f.write(voice_response.content)
-            except Exception as e:
-                logger.error(f"ElevenLabs voice failed: {e}")
-                print(f"Error generating audio: {e}", flush=True)
-                tts = gTTS(text=script, lang='en-us', tld='us', slow=False)
-                tts.save(audio_file)
-
-        try:
-            with ThreadPoolExecutor() as executor:
-                executor.submit(generate_audio)
-            logger.debug("Creating video clip")
-            img_clip = ImageClip(np.array(Image.open(io.BytesIO(img_byte_arr))), duration=30)
-            audio_clip = AudioFileClip(audio_file)
-            final_clip = img_clip.set_audio(audio_clip)
-            final_clip.write_videofile(output_file, codec="libx264", fps=24, bitrate="8000k", logger=None, threads=4)
-            logger.info(f"Video successfully created: {output_file}")
-        except Exception as e:
-            logger.error(f"Video creation failed: {e}")
-            print(f"Error creating video: {e}", flush=True)
-            raise
-
-        with lock:
-            try:
-                logger.debug(f"Updating video count for {category}/{subcategory}")
+            logger.info(f"Starting video generation for category: {category} (Attempt {attempts + 1})")
+            with lock:
+                subcategory = random.choice(list(CATEGORIES[category]))
                 if category == "Branding & Growth Strategies" and subcategory == "Storytelling & Facts":
-                    video_counts[category][subcategory][sub_subcategory] = video_num
+                    sub_subcategory = random.choice(list(STORYTELLING_SUBTOPICS.keys()))
+                    detail = random.choice(STORYTELLING_SUBTOPICS[sub_subcategory])
+                    video_num = video_counts[category][subcategory][sub_subcategory] + 1
+                    logger.debug(f"Video number for {category}/{subcategory}/{sub_subcategory}: {video_num}")
+                    if video_num >= 100:
+                        new_cat = generate_new_category(list(CATEGORIES.keys()) + list(video_counts["Generated Categories"].keys()))
+                        if new_cat not in video_counts["Generated Categories"]:
+                            video_counts["Generated Categories"][new_cat] = {sub: 0 for sub in generate_new_subcategories(new_cat)}
+                        category, subcategory, sub_subcategory = new_cat, random.choice(list(video_counts["Generated Categories"][new_cat].keys())), 0
+                        script = generate_dynamic_script(category, subcategory, "new topic", video_num)
+                        logger.info(f"Switched to new category: {new_cat}")
+                    else:
+                        script = generate_unique_script(category, subcategory, detail, video_num)
                 else:
-                    video_counts[category][subcategory] = video_num
-                save_video_counts(video_counts)
-            except Exception as e:
-                logger.error(f"Failed to update video counts: {e}")
-                print(f"Error updating video counts: {e}", flush=True)
+                    video_num = video_counts[category][subcategory] + 1
+                    logger.debug(f"Video number for {category}/{subcategory}: {video_num}")
+                    if video_num >= 100:
+                        new_cat = generate_new_category(list(CATEGORIES.keys()) + list(video_counts["Generated Categories"].keys()))
+                        if new_cat not in video_counts["Generated Categories"]:
+                            video_counts["Generated Categories"][new_cat] = {sub: 0 for sub in generate_new_subcategories(new_cat)}
+                        category, subcategory = new_cat, random.choice(list(video_counts["Generated Categories"][new_cat].keys()))
+                        script = generate_dynamic_script(category, subcategory, "new topic", video_num)
+                        logger.info(f"Switched to new category: {new_cat}")
+                    else:
+                        script = generate_unique_script(category, subcategory, "general", video_num)
 
-        return output_file, script, category, subcategory
-    except Exception as e:
-        logger.critical(f"Critical failure in generate_ai_video for {category}: {e}")
-        print(f"Critical failure in video generation: {e}", flush=True)
-        return None, f"Error Video {video_num}", category, subcategory
+            output_file = f"video_{category.replace(' ', '_')}_{subcategory.replace(' ', '_')}_{int(time.time())}.mp4"
+            logger.info(f"Output file generated: {output_file}")
+
+            # Check disk space
+            statvfs = os.statvfs('/')
+            free_space = statvfs.f_frsize * statvfs.f_bavail / (1024 * 1024)  # Free space in MB
+            if free_space < 500:  # Require at least 500MB free
+                raise RuntimeError(f"Insufficient disk space: {free_space}MB available")
+
+            # Generate assets
+            try:
+                logger.debug("Fetching face image from ThisPersonDoesNotExist")
+                face_response = requests.get("https://thispersondoesnotexist.com", timeout=5)
+                face_response.raise_for_status()
+                face_img = Image.open(io.BytesIO(face_response.content)).resize((1920, 2160), Image.LANCZOS)
+            except Exception as e:
+                logger.error(f"Failed to fetch face: {e}")
+                print(f"Error fetching face: {e}", flush=True)
+                face_img = Image.new('RGB', (1920, 2160), color='gray')
+
+            # Use Deep AI for background image generation
+            try:
+                logger.debug("Generating background image with Deep AI")
+                bg_response = requests.post(
+                    "https://api.deepai.org/api/text2img",
+                    data={"text": script},
+                    headers={"api-key": DEEP_AI_API_KEY},
+                    timeout=30
+                )
+                bg_response.raise_for_status()
+                bg_url = bg_response.json()["output_url"]
+                bg_data = requests.get(bg_url, timeout=15).content
+                bg_img = Image.open(io.BytesIO(bg_data)).resize((1920, 2160), Image.LANCZOS)
+            except Exception as e:
+                logger.error(f"Failed to generate background with Deep AI: {e}")
+                print(f"Error generating background: {e}", flush=True)
+                bg_img = Image.new('RGB', (1920, 2160), color=(200, 200, 255))  # Fallback to light blue
+
+            final_img = Image.new('RGB', (3840, 2160))
+            final_img.paste(bg_img, (0, 0))
+            final_img.paste(face_img, (1920, 0))
+            try:
+                logger.debug("Drawing text on final image")
+                draw = ImageDraw.Draw(final_img)
+                font = ImageFont.truetype("arial.ttf", 40) if os.path.exists("arial.ttf") else ImageFont.load_default()
+                draw.text((20, 20), script[:50] + "...", fill='white', font=font)
+            except Exception as e:
+                logger.error(f"Failed to draw text on image: {e}")
+                print(f"Error drawing text: {e}", flush=True)
+
+            img_byte_arr = io.BytesIO()
+            try:
+                logger.debug("Saving final image to byte array")
+                final_img.save(img_byte_arr, format='PNG')
+                img_byte_arr = img_byte_arr.getvalue()
+            except Exception as e:
+                logger.error(f"Failed to save image: {e}")
+                print(f"Error saving image: {e}", flush=True)
+                img_byte_arr = io.BytesIO(Image.new('RGB', (3840, 2160), color='gray').tobytes())
+
+            audio_file = f"audio_{category}_{subcategory}.mp3"
+
+            def generate_audio():
+                try:
+                    logger.debug(f"Generating audio for {category}/{subcategory}")
+                    headers = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"}
+                    voice_data = {"text": script, "voice_id": "21m00Tcm4TlvDq8ikWAM"}  # Rachel voice
+                    voice_response = requests.post("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", headers=headers, json=voice_data, timeout=15)
+                    voice_response.raise_for_status()
+                    with open(audio_file, "wb") as f:
+                        f.write(voice_response.content)
+                except Exception as e:
+                    logger.error(f"ElevenLabs voice failed: {e}")
+                    print(f"Error generating audio: {e}", flush=True)
+                    tts = gTTS(text=script, lang='en-us', tld='us', slow=False)
+                    tts.save(audio_file)
+
+            try:
+                with ThreadPoolExecutor() as executor:
+                    executor.submit(generate_audio)
+                logger.debug("Creating video clip")
+                img_clip = ImageClip(np.array(Image.open(io.BytesIO(img_byte_arr))), duration=30)
+                audio_clip = AudioFileClip(audio_file)
+                final_clip = img_clip.set_audio(audio_clip)
+                final_clip.write_videofile(output_file, codec="libx264", fps=24, bitrate="8000k", logger=None, threads=4)
+                logger.info(f"Video successfully created: {output_file}")
+                return output_file, script, category, subcategory
+            except Exception as e:
+                logger.error(f"Video creation failed: {e}")
+                print(f"Error creating video: {e}", flush=True)
+                if attempts == 0:  # First attempt failed, retry
+                    attempts += 1
+                    continue
+                else:  # Second attempt failed, use placeholder
+                    placeholder_script = f"Video {video_num}: What secrets lie hidden? Uncover the mystery #{video_num} now!"
+                    return output_file, placeholder_script, category, subcategory
+
+        except Exception as e:
+            logger.critical(f"Critical failure in generate_ai_video for {category}: {e}")
+            print(f"Critical failure in video generation: {e}", flush=True)
+            if attempts == 0:  # First attempt failed, retry
+                attempts += 1
+                continue
+            else:  # Second attempt failed, use placeholder
+                placeholder_script = f"Video {video_num}: A journey into the unknown awaits! Explore #{video_num} today!"
+                return None, placeholder_script, category, subcategory
+
+    # If all attempts fail, return a default placeholder
+    video_num = video_counts[category][random.choice(list(CATEGORIES[category]))] + 1
+    placeholder_script = f"Video {video_num}: What wonders will you discover? Dive in #{video_num} now!"
+    return None, placeholder_script, category, random.choice(list(CATEGORIES[category]))
 
 def upload_to_youtube(credentials, video_path, title, description, playlist_title=None):
     try:
@@ -498,35 +501,22 @@ def upload_to_youtube(credentials, video_path, title, description, playlist_titl
         print(f"Critical upload failure: {e}", flush=True)
         return False, str(e)
 
-def send_gmail_notification(credentials, subject, body):
+def send_telegram_notification(subject, body):
     try:
-        logger.info(f"Sending Gmail notification: {subject}")
-        max_retries = 5
-        for attempt in range(max_retries):
-            try:
-                url = "https://www.googleapis.com/gmail/v1/users/me/messages/send"
-                headers = {"Authorization": f"Bearer {credentials['access_token']}", "Content-Type": "application/json"}
-                message = {"raw": base64.urlsafe_b64encode(f"Subject: {subject}\n\n{body}".encode()).decode()}
-                response = requests.post(url, headers=headers, json=message, timeout=5)
-                response.raise_for_status()
-                logger.info("Gmail notification sent successfully.")
-                print(f"Gmail notification sent: {subject}", flush=True)
-                return True
-            except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 401:
-                    logger.warning(f"401 error detected, refreshing token for Gmail attempt {attempt + 1}")
-                    print(f"401 error for Gmail, refreshing token", flush=True)
-                    refresh_token(credentials)
-                    continue
-                logger.error(f"Gmail notification attempt {attempt + 1} failed: {e}")
-                print(f"Gmail notification failed: {e}", flush=True)
-                if attempt == max_retries - 1:
-                    logger.error("Max retries reached for Gmail notification, skipping.")
-                    return False
-                time.sleep(0.5 * (2 ** attempt))
+        logger.info(f"Sending Telegram notification: {subject}")
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": f"{subject}\n\n{body}"
+        }
+        response = requests.post(url, json=payload, timeout=10)
+        response.raise_for_status()
+        logger.info("Telegram notification sent successfully.")
+        print(f"Telegram notification sent: {subject}", flush=True)
+        return True
     except Exception as e:
-        logger.critical(f"Critical failure in send_gmail_notification: {e}")
-        print(f"Critical Gmail failure: {e}", flush=True)
+        logger.error(f"Failed to send Telegram notification: {e}")
+        print(f"Telegram notification failed: {e}", flush=True)
         return False
 
 def main():
@@ -548,8 +538,8 @@ def main():
                 with ThreadPoolExecutor() as executor:
                     future = executor.submit(generate_ai_video, category, video_counts)
                     video_path, script, final_category, final_subcategory = future.result(timeout=300)
-                    if video_path is None:
-                        raise ValueError("Video generation failed")
+                    if video_path is None and "Error" in script:
+                        raise ValueError("Video generation failed with placeholder")
 
                 subcategory = final_subcategory if final_category == "Branding & Growth Strategies" and final_subcategory in ["Storytelling & Facts", "Sponsorship & Brand Deals"] else random.choice(CATEGORIES[final_category])
                 video_num = video_counts[final_category][subcategory] + 1 if subcategory != "Storytelling & Facts" else video_counts[final_category]["Storytelling & Facts"][final_subcategory] + 1
@@ -578,9 +568,9 @@ def main():
 
                 subject = "YouTube Upload " + ("Success" if success else "Failure")
                 body = f"Video '{title}' upload {'succeeded' if success else 'failed'}: {message}"
-                if not send_gmail_notification(GMAIL_CREDENTIALS, subject, body):
-                    logger.error("Failed to send Gmail notification after retries.")
-                    print("Failed to send Gmail notification", flush=True)
+                if not send_telegram_notification(subject, body):
+                    logger.error("Failed to send Telegram notification after retries.")
+                    print("Failed to send Telegram notification", flush=True)
 
                 category_index += 1
                 if category_index >= len(CATEGORIES):
@@ -593,11 +583,11 @@ def main():
             except (TimeoutError, ValueError) as e:
                 logger.error(f"Execution timeout or value error for {category}: {e}")
                 print(f"Timeout or value error: {e}", flush=True)
-                send_gmail_notification(GMAIL_CREDENTIALS, "Execution Error", f"Timeout or value error for {category}: {e}")
+                send_telegram_notification("Execution Error", f"Timeout or value error for {category}: {e}")
             except Exception as e:
                 logger.error(f"Main execution failed for {category}: {e}")
                 print(f"Main execution failed: {e}", flush=True)
-                send_gmail_notification(GMAIL_CREDENTIALS, "Critical Error", f"Script failed for {category}: {e}")
+                send_telegram_notification("Critical Error", f"Script failed for {category}: {e}")
 
             finally:
                 if video_path or category:  # Only attempt cleanup if variables are set
@@ -621,7 +611,7 @@ def main():
     except Exception as e:
         logger.critical(f"Critical failure in main loop: {e}")
         print(f"Critical failure: {e}", flush=True)
-        send_gmail_notification(GMAIL_CREDENTIALS, "Critical Failure", f"Script crashed: {e}")
+        send_telegram_notification("Critical Failure", f"Script crashed: {e}")
         deployment_logger.critical(f"Deployment failed: {e}")
 
 if __name__ == "__main__":
