@@ -76,7 +76,6 @@ def retry_request(func, *args, max_attempts=2, backoff_factor=2, **kwargs):
             delay *= backoff_factor
     raise Exception(f"All {max_attempts} attempts failed.")
 
-# --- AI CONTENT GENERATION ---
 def generate_ai_content(category):
     prompt = f"""
 Generate a catchy TITLE, DESCRIPTION, and PRICE in USD for a digital product in this category: {category}.
@@ -121,7 +120,6 @@ def fallback_static(category):
     desc = f"A complete {category.lower()} solution to level up your productivity."
     return title, desc + "\n\n⚡ Grab this limited edition drop!", round(random.uniform(5, 25), 2)
 
-# --- IMAGE GENERATION ---
 def generate_ai_thumbnail():
     prompt = random.choice([
         "Smiling human face professional photo",
@@ -143,7 +141,6 @@ def generate_ai_thumbnail():
         print("[Image Generation Fallback]", e)
         return get_next_placeholder_image()
 
-# --- GUMROAD PRODUCT CREATION ---
 def create_gumroad_product(title, description, price, thumbnail_url):
     url = "https://api.gumroad.com/v2/products"
     payload = {
@@ -200,7 +197,6 @@ def cleanup_temp_files():
             os.remove(file)
             print(f"[Cleanup] Deleted {file}")
 
-# --- TELEGRAM ---
 def send_telegram_message(title, price, url, thumbnail_url=None):
     inr_price = round(price * 83.2, 2)
     caption = f"**{title}**\n\nPrice: ${price} (~₹{inr_price})\n\nLive Now: {url}\n\n🚀 Hurry — this drop won't last!"
@@ -220,7 +216,6 @@ def send_telegram_message(title, price, url, thumbnail_url=None):
             data={"chat_id": TELEGRAM_CHAT_ID, "text": caption, "parse_mode": "Markdown"}
         )
 
-# --- MAIN ---
 def autopilot():
     print(f"[{datetime.now()}] Started autopilot run.\n")
 
