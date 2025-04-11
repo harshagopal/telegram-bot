@@ -182,7 +182,13 @@ def get_playlist_id(youtube, playlist_title):
         for item in response.get('items', []):
             if item['snippet']['title'] == playlist_title:
                 logger.info(f"Found playlist ID for {playlist_title}: {item['id']}")
-   
+                return item['id']  # Properly indented return statement
+        logger.warning(f"Playlist {playlist_title} not found.")
+        return None  # Return None if playlist not found
+    except Exception as e:
+        logger.error(f"Failed to get playlist ID for {playlist_title}: {e}")
+        return None  # Return None on error
+        
 def generate_unique_script(category, subcategory, sub_subcategory, video_num):
     try:
         logger.info(f"Generating script for {category}/{subcategory}/{sub_subcategory}, video #{video_num}")
