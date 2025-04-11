@@ -165,11 +165,11 @@ def refresh_token(credentials):
         new_token = creds.token
         credentials["access_token"] = new_token
         logger.info("Token refreshed successfully using google-auth.")
-        return new_token
+        return creds  # Return the full Credentials object
     except Exception as e:
         logger.error(f"Failed to refresh token: {str(e)}")
         raise RuntimeError(f"Token refresh failed: {str(e)}")
-
+        
 def get_playlist_id(youtube, playlist_title):
     try:
         logger.info(f"Checking playlist ID for {playlist_title}")
@@ -182,13 +182,7 @@ def get_playlist_id(youtube, playlist_title):
         for item in response.get('items', []):
             if item['snippet']['title'] == playlist_title:
                 logger.info(f"Found playlist ID for {playlist_title}: {item['id']}")
-                return item['id']
-        logger.warning(f"Playlist {playlist_title} not found.")
-        return None
-    except Exception as e:
-        logger.error(f"Failed to get playlist ID for {playlist_title}: {e}")
-        return None
-
+   
 def generate_unique_script(category, subcategory, sub_subcategory, video_num):
     try:
         logger.info(f"Generating script for {category}/{subcategory}/{sub_subcategory}, video #{video_num}")
@@ -430,7 +424,12 @@ def upload_to_youtube(credentials, video_path, title, description, playlist_titl
     try:
         logger.info(f"Starting upload for video: {title}")
         max_retries = 5
-        youtube = build('youtube', 'v3', developerKey=credentials["access_token"], cache_discovery=False)
+
+        # Refresh the token and get credentials
+        creds = refresh_token(credentials)
+
+        # Build the service with OAuth2 credentials
+        youtube = build('youtube', 'v3', credentials=creds, cache_discovery=False)
         playlist_id = None
 
         if playlist_title:
@@ -486,10 +485,10 @@ def upload_to_youtube(credentials, video_path, title, description, playlist_titl
 
                 return True, response
             except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 401:
-                    logger.warning(f"401 error detected, refreshing token for attempt {attempt + 1}")
-                    print(f"401 error, refreshing token", flush=True)
-                    refresh_token(credentials)
+                if e.response.status_code in [401, 403]:  # Unauthorized or Forbidden
+                    logger.warning(f"Authentication error detected ({e.response.status_code}), refreshing token for attempt {attempt + 1}")
+                    print(f"Authentication error, refreshing token", flush=True)
+                    creds = refresh_token(credentials)  # Refresh and retry
                     continue
                 logger.error(f"Upload attempt {attempt + 1} failed: {e}")
                 print(f"Upload failed: {e}", flush=True)
