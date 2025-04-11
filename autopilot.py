@@ -6,7 +6,7 @@ from datetime import datetime
 from base64 import b64decode
 from dotenv import load_dotenv
 
-# Load environment variables (auto handled in Railway too)
+# Load environment variables
 load_dotenv()
 
 GUMROAD_ACCESS_TOKEN = os.getenv("GUMROAD_ACCESS_TOKEN")
@@ -60,7 +60,7 @@ def get_next_placeholder_image():
         f.write(str(next_idx))
     return PLACEHOLDER_IMAGES[next_idx]
 
-def retry_request(func, *args, max_attempts=2, backoff_factor=2, **kwargs):
+def retry_request(func, *args, max_attempts=3, backoff_factor=2, **kwargs):
     delay = 1
     for attempt in range(1, max_attempts + 1):
         try:
@@ -182,58 +182,36 @@ def create_gumroad_product(title, description, price, thumbnail_url):
         retry_request(
             requests.post,
             f"https://api.gumroad.com/v2/products/{product_id}/files",
-            data={"access_token": GUMROAD_ACCESS_TOKEN},
+            data={"access_token": GUMROAD_ACCESS_TOKEN, "name": "product.txt"},
             files={"file": file}
         )
 
-    cleanup_temp_files()
-    product_url = f"https://gumroad.com/l/{product_id}"
-    print("[Gumroad] Product Created:", product_url)
-    return product_url, thumbnail_url
-
-def cleanup_temp_files():
-    for file in ["thumb.jpg", "dummy.txt"]:
-        if os.path.exists(file):
-            os.remove(file)
-            print(f"[Cleanup] Deleted {file}")
-
-def send_telegram_message(title, price, url, thumbnail_url=None):
-    inr_price = round(price * 83.2, 2)
-    caption = f"**{title}**\n\nPrice: ${price} (~₹{inr_price})\n\nLive Now: {url}\n\n🚀 Hurry — this drop won't last!"
-
-    if thumbnail_url and not thumbnail_url.startswith("data:image"):
-        image_content = requests.get(thumbnail_url).content
-        retry_request(
-            requests.post,
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
-            data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"},
-            files={"photo": ("thumb.jpg", image_content)}
-        )
-    else:
-        retry_request(
-            requests.post,
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            data={"chat_id": TELEGRAM_CHAT_ID, "text": caption, "parse_mode": "Markdown"}
-        )
+    return product.get("short_url"), thumbnail_url
 
 def autopilot():
-    print(f"[{datetime.now()}] Started autopilot run.\n")
+    print(f"\n[{datetime.now()}] Started autopilot run.\n")
 
+    history = load_history()
     category = get_next_category()
-    print("[Category] Selected:", category)
+    print(f"[Category] Selected: {category}")
 
     title, description, price = generate_ai_content(category)
-
-    if title in load_history():
-        print("[Skip] Already posted:", title)
+    if title in history:
+        print("[Duplicate] Title already used. Skipping.")
         return
 
     image_url = generate_ai_thumbnail()
     product_url, thumb = create_gumroad_product(title, description, price, image_url)
-    send_telegram_message(title, price, product_url, thumb)
+
+    message = f"**{title}**\n\n{description}\n\nPrice: ${price}\n\nBuy Now: {product_url}"
+    requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
+        data={"chat_id": TELEGRAM_CHAT_ID, "caption": message, "parse_mode": "Markdown"},
+        files={"photo": requests.get(thumb).content}
+    )
 
     update_history(title)
-    print("\n[Success] Product Created and Posted!")
+    print("[Success] Product created and posted.")
 
 if __name__ == "__main__":
     autopilot()
